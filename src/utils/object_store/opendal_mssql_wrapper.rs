@@ -9,31 +9,28 @@ use bb8_tiberius::ConnectionManager;
 use chrono::NaiveDateTime;
 use tiberius::Query;
 
-pub type ObjectStoreConnectionPool = Pool<ConnectionManager>;
-pub struct MssqlStore {
-    pool: ObjectStoreConnectionPool,
-}
-
 #[derive(Debug, Clone)]
 pub struct ObjectStoreRecord {
     pub bucket: String,
     pub object_id: String,
     pub metadata: Vec<u8>,
     pub objcontent: Vec<u8>,
-    pub original_size: i64,
-    pub compressed_size: i64,
+    pub original_size: i32,
+    pub compressed_size: i32,
     pub lmts: NaiveDateTime,
+}
+
+pub type ObjectStoreConnectionPool = Pool<ConnectionManager>;
+#[derive(Clone, Debug)]
+pub struct MssqlStore {
+    object_store_conn_pool: ObjectStoreConnectionPool,
 }
 impl MssqlStore {
     pub async fn new_mssql() -> Result<Self, DbError> {
-        let pool = match init_db_connection_pool("MsSqlStore").await {
-            Ok(p) => {p},
-            Err(e) => {
-                eprintln!("❌ Failed to create MsSqlStore pool: {}", e);
-                return Err(e);
-            }
-        }
-
+        let object_store_conn_pool = init_db_connection_pool("MsSqlStore").await?;
+        Ok(Self {
+            object_store_conn_pool,
+        })
     }
 
     pub async fn get(
@@ -43,7 +40,7 @@ impl MssqlStore {
         year: &str,
     ) -> Result<ObjectStoreRecord, ObjectStoreError> {
         let mut conn = self
-            .pool
+            .object_store_conn_pool
             .get()
             .await
             .map_err(ObjectStoreError::from)
@@ -52,10 +49,11 @@ impl MssqlStore {
         let sql_sentence = format!(
             "SELECT OBJCONTENT, ORIGINALSIZE, COMPRESSEDSIZE
              FROM {}.dbo.{}
-             WHERE BUCKET = @P1 AND OBJECTID > @P2",
+             WHERE BUCKET = @P1 AND OBJECTID = @P2",
             self.get_dbname(year),
             format!("OBJECTSTORE_{}", year)
         );
+        println!("Sql_sentence: {}", sql_sentence);
 
         let mut query = Query::new(sql_sentence);
         query.bind(bucket.to_string());
@@ -65,13 +63,14 @@ impl MssqlStore {
             .query(&mut *conn)
             .await
             .map_err(ObjectStoreError::from)
-            .ctx("MsSqlStore : get : quert")?;
+            .ctx("MsSqlStore : get : query")?;
         let rows = stream
             .into_first_result()
             .await
             .map_err(ObjectStoreError::from)
             .ctx("MsSqlStore : get : stream")?;
 
+        println!("number of rows: {}", rows.len());
         if rows.len() > 1 {
             return Err(ObjectStoreError::MultipleRecordsFound(
                 bucket.to_string(),
@@ -84,28 +83,12 @@ impl MssqlStore {
             .get::<&[u8], _>(0)
             .ok_or_else(|| ObjectStoreError::MissingField("missing object_content".to_string()))?;
         let original_size = row
-            .get::<i64, _>(1)
+            .get::<i32, _>(1)
             .ok_or_else(|| ObjectStoreError::MissingField("missing original_size".to_string()))?;
         let compressed_size = row
-            .get::<i64, _>(2)
+            .get::<i32, _>(2)
             .ok_or_else(|| ObjectStoreError::MissingField("missing compressed_size".to_string()))?;
-        /*
-                for row in rows {
-                    // Try to extract all fields
-                    let Some(object_content) = row.get::<&[u8], _>(0) else {
-                        eprintln!("⚠️ Skipping row: missing object_content");
-                        continue;
-                    };
-                    let Some(original_size) = row.get::<i64, _>(1) else {
-                        eprintln!("⚠️ Skipping row: missing original_size");
-                        continue;
-                    };
-                    let Some(compressed_size) = row.get::<i64, _>(2) else {
-                        eprintln!("⚠️ Skipping row: missing original_size");
-                        continue;
-                    };
-                }
-        */
+
         Ok(ObjectStoreRecord {
             bucket: bucket.to_string(),
             object_id: key.to_string(),
@@ -118,6 +101,6 @@ impl MssqlStore {
     }
 
     fn get_dbname(&self, year: &str) -> String {
-        format!("uut_{}", year)
+        format!("EFaturaDB01_{}", year)
     }
 }

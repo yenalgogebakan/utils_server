@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 */
+#[derive(Debug, Clone)]
 pub enum Store {
     //Dal(DalStore),
     Mssql(MssqlStore),
@@ -61,7 +62,7 @@ impl Store {
     }
     */
 
-    async fn get(
+    pub async fn get(
         &self,
         bucket: &str,
         key: &str,

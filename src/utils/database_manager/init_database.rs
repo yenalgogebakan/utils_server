@@ -10,9 +10,9 @@ pub type ConnectionPool = Pool<ConnectionManager>;
 
 #[derive(Clone)]
 pub struct DbPools {
-    pub object_pool: ConnectionPool,
-    pub xslt_pool: ConnectionPool,
-    pub cert_pool: ConnectionPool,
+    pub incoming_invoice_pool: ConnectionPool,
+    //pub xslt_pool: ConnectionPool,
+    //pub cert_pool: ConnectionPool,
 }
 
 pub async fn init_db_connection_pool(name: &str) -> Result<ConnectionPool, DbError> {
@@ -41,11 +41,12 @@ pub async fn init_db_connection_pool(name: &str) -> Result<ConnectionPool, DbErr
 }
 
 pub async fn init_db_connection_pools() -> Result<DbPools, AppError> {
-    let object_pool = init_db_connection_pool("object_pool")
+    let incoming_invoice_pool = init_db_connection_pool("object_pool")
         .await
         .map_err(AppError::from) // DbError -> AppError
         .ctx("init_db_connection_pools/object")?;
 
+    /*
     let xslt_pool = init_db_connection_pool("xslt_pool")
         .await
         .map_err(AppError::from)
@@ -55,11 +56,11 @@ pub async fn init_db_connection_pools() -> Result<DbPools, AppError> {
         .await
         .map_err(AppError::from)
         .ctx("init_db_connection_pools/cert")?;
-
+        */
     Ok(DbPools {
-        object_pool,
-        xslt_pool,
-        cert_pool,
+        incoming_invoice_pool,
+        //xslt_pool,
+        //cert_pool,
     })
 }
 

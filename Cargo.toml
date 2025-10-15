@@ -31,7 +31,8 @@ base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 opendal = { version = "0.51", features = ["services-s3", "services-postgresql"] }
-#async-trait = "0.1"
+regex = "1"
+lazy_static = "1.4" # Optional, but good for compiling regex once
 
 [dev-dependencies]
 axum-test = { version = "17.3.0" } # Library for writing tests for web servers written using Axum.

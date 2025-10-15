@@ -4,6 +4,7 @@ use crate::utils::download_request::download_request_types::{
     DownloadDocRequest, DownloadFormat, DownloadType,
 };
 use crate::utils::incoming_invoice::incoming_invoice_rec::IncomingInvoiceRec;
+use crate::utils::object_store::object_store::Store;
 
 use super::process_invoices_types::{GetAndProcessInvoicesRequest, GetAndProcessInvoicesResult};
 
@@ -24,7 +25,10 @@ impl GetAndProcessInvoicesRequest {
         self.invoices.iter()
     }
 
-    pub async fn process(&self) -> anyhow::Result<GetAndProcessInvoicesResult> {
+    pub async fn process(
+        &self,
+        object_store: &Store,
+    ) -> anyhow::Result<GetAndProcessInvoicesResult> {
         // Placeholder for processing logic
         println!(
             "Processing {} invoices for request: {}",
@@ -37,13 +41,15 @@ impl GetAndProcessInvoicesRequest {
         }
 
         match (self.request.download_type, self.request.format) {
-            (DownloadType::Html, DownloadFormat::Zip) => match self.process_into_html().await {
-                Ok(result) => Ok(result),
-                Err(e) => {
-                    eprintln!("❌ Error processing invoices: {}", e);
-                    Err(e)
+            (DownloadType::Html, DownloadFormat::Zip) => {
+                match self.process_into_html(object_store).await {
+                    Ok(result) => Ok(result),
+                    Err(e) => {
+                        eprintln!("❌ Error processing invoices: {}", e);
+                        Err(e)
+                    }
                 }
-            },
+            }
             _ => Err(anyhow::anyhow!(
                 "Processing for the specified download type and format is not implemented yet."
             )),

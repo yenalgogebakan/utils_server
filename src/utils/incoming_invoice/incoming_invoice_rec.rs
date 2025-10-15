@@ -1,4 +1,6 @@
 //use crate::utils::object_store_old::s3object::S3Object;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::fmt;
 
 #[derive(Default, Debug, serde::Serialize)]
@@ -9,6 +11,10 @@ pub struct IncomingInvoiceRec {
     pub sira_no: u64,
     pub path: String,
     //pub s3: Option<Box<S3Object>>,
+}
+
+lazy_static! {
+    static ref YEAR_REGEX: Regex = Regex::new(r"-\b(\d{4})\b").unwrap();
 }
 
 impl fmt::Display for IncomingInvoiceRec {
@@ -64,5 +70,15 @@ impl IncomingInvoiceRec {
             path: path.into(),
             //s3: None,
         }
+    }
+
+    pub fn extract_year_as_string(&self) -> Option<String> {
+        YEAR_REGEX
+            .captures(&self.path) // Try to find the pattern and capture groups
+            .and_then(|caps| {
+                // If captures are found, try to get the first captured group (index 1)
+                // This group contains the actual four digits of the year.
+                caps.get(1).map(|m| m.as_str().to_string()) // Convert the matched &str to an owned String
+            })
     }
 }

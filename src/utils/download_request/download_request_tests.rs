@@ -3,6 +3,8 @@ use crate::utils::download_request::download_request_types::{
     DownloadDocRequest, DownloadFormat, DownloadType,
 };
 use crate::utils::get_and_process_invoices::process_invoices_types::GetAndProcessInvoicesRequest;
+use crate::utils::object_store::object_store::Store;
+use crate::utils::object_store::opendal_mssql_wrapper::MssqlStore;
 
 use std::sync::Arc;
 
@@ -23,7 +25,7 @@ async fn test_no_invoice_after_sirano() {
     };
 
     let invoices = request
-        .get_incoming_invoice_recs(&pools.object_pool)
+        .get_incoming_invoice_recs(&pools.incoming_invoice_pool)
         .await
         .unwrap();
     assert_eq!(invoices.len(), 0);
@@ -41,7 +43,7 @@ async fn test_get_100_invoices() {
     };
 
     let invoices = request
-        .get_incoming_invoice_recs(&pools.object_pool)
+        .get_incoming_invoice_recs(&pools.incoming_invoice_pool)
         .await
         .unwrap();
     assert!(invoices.len() == 100, "Should retrieve 100 invoices");
@@ -60,7 +62,7 @@ async fn test_get_44_invoices() {
     let request: Arc<DownloadDocRequest> = Arc::new(request);
 
     let invoices = request
-        .get_incoming_invoice_recs(&pools.object_pool)
+        .get_incoming_invoice_recs(&pools.incoming_invoice_pool)
         .await
         .unwrap();
     assert!(invoices.len() == 9, "Should retrieve 44 invoices");
@@ -70,7 +72,12 @@ async fn test_get_44_invoices() {
         request: request.clone(),
         invoices: invoices,
     };
-    match process_invoices_req.process().await {
+    let object_store = Store::Mssql(
+        MssqlStore::new_mssql()
+            .await
+            .expect("Failed to init MSSQL store"),
+    );
+    match process_invoices_req.process(&object_store).await {
         Ok(result) => {
             println!(
                 "✅ Processed {} invoices, size: {} bytes",
@@ -95,7 +102,7 @@ async fn test_invoices_sorted() {
     };
 
     let invoices = request
-        .get_incoming_invoice_recs(&pools.object_pool)
+        .get_incoming_invoice_recs(&pools.incoming_invoice_pool)
         .await
         .unwrap();
 

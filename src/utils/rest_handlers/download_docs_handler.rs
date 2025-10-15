@@ -25,25 +25,8 @@ pub async fn download_docs_handler(
     );
     let request: Arc<DownloadDocRequest> = Arc::new(request);
 
-    // Fetch invoice records from database
-    /*
-    let invoices = request
-        .get_incoming_invoice_recs(&state.db_pools.object_pool)
-        .await
-        .map_err(|e| {
-            eprintln!("❌ Database error: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: "DatabaseError".to_string(),
-                    message: format!("Failed to fetch invoices: {}", e),
-                }),
-            )
-        })?;
-        */
-
     let invoices = match request
-        .get_incoming_invoice_recs(&state.db_pools.object_pool)
+        .get_incoming_invoice_recs(&state.db_pools.incoming_invoice_pool)
         .await
     {
         Ok(invoices) => invoices,
@@ -78,12 +61,24 @@ pub async fn download_docs_handler(
         }
     };
     println!("✅ Found {} invoice records", invoices.len());
+    if invoices.is_empty() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: "NoInvoices".to_string(),
+                message: format!(
+                    "No invoices found for vkntckn {} after sirano {}",
+                    request.source_vkntckn, request.after_this
+                ),
+            }),
+        ));
+    }
 
     let process_invoices_req = GetAndProcessInvoicesRequest {
         request: request.clone(),
         invoices: invoices,
     };
-    match process_invoices_req.process().await {
+    match process_invoices_req.process(&state.object_store).await {
         Ok(result) => {
             println!(
                 "✅ Processed {} invoices, size: {} bytes",

@@ -4,6 +4,8 @@ use std::sync::Arc;
 use libs::utils::appstate::appstate::AppState;
 use libs::utils::appstate::appstate::SharedState;
 use libs::utils::database_manager;
+use libs::utils::object_store::object_store::Store;
+use libs::utils::object_store::opendal_mssql_wrapper::MssqlStore;
 use libs::utils::rest_handlers::download_docs_handler;
 
 #[tokio::main]
@@ -28,8 +30,16 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+    let object_store = Store::Mssql(
+        MssqlStore::new_mssql()
+            .await
+            .expect("Failed to init MSSQL store"),
+    );
 
-    let app_state = Arc::new(AppState { db_pools });
+    let app_state = Arc::new(AppState {
+        db_pools,
+        object_store,
+    });
     let app = create_app(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3090").await.unwrap();

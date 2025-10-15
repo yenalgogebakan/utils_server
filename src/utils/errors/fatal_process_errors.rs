@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum ObjectStoreError {
+pub enum FatalProcessError {
     #[error("can not extract database name path: {0}")]
     CanNotExtractDatabaseName(String),
 
@@ -20,28 +20,28 @@ pub enum ObjectStoreError {
     #[error("Missing field '{0}' ")]
     MissingField(String),
 
-    //#[error("{0}")]
-    //Other(#[from] anyhow::Error),
+    #[error("{0}")]
+    Other(#[from] anyhow::Error),
 
     // Function context (preserves typed inner error)
     #[error("{func}: {source}")]
     Context {
         func: &'static str,
         #[source]
-        source: Box<ObjectStoreError>,
+        source: Box<FatalProcessError>,
     },
 }
 
 pub trait ErrCtx<T> {
-    fn ctx(self, func: &'static str) -> Result<T, ObjectStoreError>;
+    fn ctx(self, func: &'static str) -> Result<T, FatalProcessError>;
 }
 
 impl<T, E> ErrCtx<T> for Result<T, E>
 where
-    E: Into<ObjectStoreError>,
+    E: Into<FatalProcessError>,
 {
-    fn ctx(self, func: &'static str) -> Result<T, ObjectStoreError> {
-        self.map_err(|e| ObjectStoreError::Context {
+    fn ctx(self, func: &'static str) -> Result<T, FatalProcessError> {
+        self.map_err(|e| FatalProcessError::Context {
             func,
             source: Box::new(e.into()),
         })
