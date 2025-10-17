@@ -99,6 +99,44 @@ impl MssqlStore {
             lmts: chrono::Local::now().naive_local(),
         })
     }
+    pub async fn object_exists(
+        &self,
+        bucket: &str,
+        key: &str,
+        year: &str,
+    ) -> Result<bool, ObjectStoreError> {
+        let mut conn = self
+            .object_store_conn_pool
+            .get()
+            .await
+            .map_err(ObjectStoreError::from)
+            .ctx("MsSqlStore : object_exists : get conn from pool")?;
+
+        let sql_sentence = format!(
+            "SELECT TOP 1 OBJECTID
+            FROM {}.dbo.{}
+            WHERE BUCKET = @P1 AND OBJECTID = @P2",
+            self.get_dbname(year),
+            format!("OBJECTSTORE_{}", year)
+        );
+        let mut query = Query::new(sql_sentence);
+        query.bind(bucket.to_string());
+        query.bind(key.to_string());
+
+        let stream = query
+            .query(&mut *conn)
+            .await
+            .map_err(ObjectStoreError::from)
+            .ctx("MsSqlStore : get : query")?;
+        let rows = stream
+            .into_first_result()
+            .await
+            .map_err(ObjectStoreError::from)
+            .ctx("MsSqlStore : get : stream")?;
+
+        println!("number of rows: {}", rows.len());
+        if rows.len() > 0 { Ok(true) } else { Ok(false) }
+    }
 
     fn get_dbname(&self, year: &str) -> String {
         format!("EFaturaDB01_{}", year)

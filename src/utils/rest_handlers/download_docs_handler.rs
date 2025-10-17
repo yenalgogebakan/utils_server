@@ -1,70 +1,86 @@
 use axum::{Json, extract::State, http::StatusCode};
 
-use base64::{Engine as _, engine::general_purpose};
-use flate2::Compression;
-use flate2::write::GzEncoder;
-use std::io::Write;
-use std::sync::Arc;
+//use base64::{Engine as _, engine::general_purpose};
+//use flate2::Compression;
+//use flate2::write::GzEncoder;
+//use std::io::Write;
+use serde::Serialize;
 
-use crate::utils::download_request::download_request_types::DownloadDocRequest;
-use crate::utils::errors::download_request_errors::DownloadRequestError;
-use crate::utils::incoming_invoice::incoming_invoice_rec;
-use crate::utils::rest_handlers::rest_responses::{DownloadResponse, ErrorResponse};
-use crate::utils::{
-    appstate::appstate,
-    get_and_process_invoices::process_invoices_types::GetAndProcessInvoicesRequest,
-};
+use crate::utils::appstate::appstate;
+use crate::utils::common::download_types_and_formats::{DownloadFormat, DownloadType};
+use crate::utils::incoming_invoice::get_incoming_invoice_recs_afterthis::get_incoming_invoice_recs_afterthis;
+use crate::utils::process_invoices_into_download_types_and_formats::process_invoices_accordingto_types_and_formats::process_invoices_accordingto_types_and_formats;
+
+// REST request and response structs
+#[derive(Serialize, serde::Deserialize, Debug, Clone)]
+pub struct DownloadDocsRequest {
+    pub source_vkntckn: String,
+    pub after_this: i64,
+    pub download_type: DownloadType,
+    pub format: DownloadFormat,
+}
+impl std::fmt::Display for DownloadDocsRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "Source vkntckn: {} after count: {} download type: {} format: {}",
+            self.source_vkntckn, self.after_this, self.download_type, self.format
+        )
+    }
+}
+
+// Response wrapper for base64 encoded zip
+#[derive(Serialize, Debug)]
+pub struct DownloadDocsResponse {
+    pub data: String, // base64 encoded zip
+    pub filename: String,
+    pub record_count: usize,
+    pub size_bytes: usize,
+}
+// Error response
+#[derive(Serialize)]
+pub struct DownloadDocsErrorResponse {
+    pub error: String,
+    pub message: String,
+}
 
 pub async fn download_docs_handler(
     State(state): State<appstate::SharedState>,
-    Json(request): Json<DownloadDocRequest>,
-) -> Result<Json<DownloadResponse>, (StatusCode, Json<ErrorResponse>)> {
+    Json(request): Json<DownloadDocsRequest>,
+) -> Result<Json<DownloadDocsResponse>, (StatusCode, Json<DownloadDocsErrorResponse>)> {
     println!(
         "📥 Download request: vkntckn={}, after_this={}, type={:?}",
         request.source_vkntckn, request.after_this, request.download_type
     );
-    let request: Arc<DownloadDocRequest> = Arc::new(request);
 
-    let invoices = match request
-        .get_incoming_invoice_recs(&state.db_pools.incoming_invoice_pool)
-        .await
+    // At this point, we have the request and can query the database for invoice records. The dbname for INCOMING_INVOICES is "uut_24_6"
+    let dbname = "uut_24_6";
+    let invoices = match get_incoming_invoice_recs_afterthis(
+        &state.db_pools.incoming_invoice_pool,
+        &dbname,
+        &request.source_vkntckn,
+        request.after_this,
+    )
+    .await
     {
         Ok(invoices) => invoices,
-
-        Err(e) => {
-            match e {
-                DownloadRequestError::InvalidTypeFormat {
-                    downloadtype,
-                    format,
-                } => {
-                    return Err((
-                        StatusCode::NOT_FOUND,
-                        Json(ErrorResponse {
-                            error: "Wrong type and format".to_string(),
-                            //message: "Allowed types Html, Pdf, Ubl, UblXsltSeparate and formats Zip, Gzip but i got {downloadtype:?} and {format:?}".to_string(),
-                            message: format!(
-                                "Allowed types Html, Pdf, Ubl, UblXsltSeparate and formats Zip, Gzip but i got {downloadtype:?} and {format:?}"
-                            ),
-                        }),
-                    ));
-                }
-                _ => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse {
-                            error: "Internal Error".to_string(),
-                            message: format!("Error source: {}", e),
-                        }),
-                    ));
-                }
+        Err(e) => match e {
+            _ => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(DownloadDocsErrorResponse {
+                        error: "Internal Error".to_string(),
+                        message: format!("Error source: {}", e),
+                    }),
+                ));
             }
-        }
+        },
     };
     println!("✅ Found {} invoice records", invoices.len());
     if invoices.is_empty() {
         return Err((
             StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
+            Json(DownloadDocsErrorResponse {
                 error: "NoInvoices".to_string(),
                 message: format!(
                     "No invoices found for vkntckn {} after sirano {}",
@@ -74,17 +90,20 @@ pub async fn download_docs_handler(
         ));
     }
 
-    let process_invoices_req = GetAndProcessInvoicesRequest {
-        request: request.clone(),
-        invoices: invoices,
-    };
-    match process_invoices_req.process(&state.object_store).await {
+    match process_invoices_accordingto_types_and_formats(
+        &state.object_store,
+        &invoices,
+        request.download_type,
+        request.format,
+    )
+    .await
+    {
         Ok(result) => {
             println!(
                 "✅ Processed {} invoices, size: {} bytes",
                 result.record_count, result.size_bytes
             );
-            return Ok(Json(DownloadResponse {
+            return Ok(Json(DownloadDocsResponse {
                 data: result.data,
                 filename: result.filename,
                 record_count: result.record_count,
@@ -95,7 +114,7 @@ pub async fn download_docs_handler(
             eprintln!("❌ Processing error: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
+                Json(DownloadDocsErrorResponse {
                     error: "ProcessingError".to_string(),
                     message: format!("Failed to process invoices: {}", e),
                 }),
@@ -114,7 +133,7 @@ pub async fn download_docs_handler(
     }
     */
 }
-
+/*
 fn compress_data(data: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(data)?;
@@ -169,3 +188,4 @@ fn convert_json_and_return_http_response(
         size_bytes: compressed_data.len(),
     }))
 }
+*/

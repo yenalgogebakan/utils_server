@@ -1,7 +1,5 @@
 use thiserror::Error;
 
-use crate::utils::download_request::download_request_types::{DownloadFormat, DownloadType};
-
 #[derive(Debug, Error)]
 pub enum DownloadRequestError {
     #[error("can not extract database name path: {0}")]
@@ -12,12 +10,6 @@ pub enum DownloadRequestError {
 
     #[error("problem in query build and execution: {0} ")]
     CanNotExcuteQuery(#[from] tiberius::error::Error),
-
-    #[error("invalid download type or format (downloadtype {downloadtype:?}, format {format:?})")]
-    InvalidTypeFormat {
-        downloadtype: DownloadType,
-        format: DownloadFormat,
-    },
 
     // Function context (preserves typed inner error)
     #[error("{func}: {source}")]

@@ -1,7 +1,6 @@
 use crate::utils::errors::{
     db_errors::DbError, download_request_errors::DownloadRequestError,
-    fatal_process_errors::FatalProcessError, object_store_errors::ObjectStoreError,
-    xml_errors::XmlError,
+    object_store_errors::ObjectStoreError, processing_errors::ProcessError, xml_errors::XmlError,
 };
 use thiserror::Error;
 
@@ -20,7 +19,7 @@ pub enum AppError {
     ObjectStore(#[from] ObjectStoreError),
 
     #[error(transparent)]
-    FatalProcess(#[from] FatalProcessError),
+    Process(#[from] ProcessError),
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),

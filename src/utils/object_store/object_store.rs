@@ -73,4 +73,16 @@ impl Store {
             Store::Mssql(s) => s.get(bucket, key, year).await,
         }
     }
+
+    pub async fn object_exists(
+        &self,
+        bucket: &str,
+        key: &str,
+        year: &str,
+    ) -> Result<bool, ObjectStoreError> {
+        match self {
+            //Store::Dal(s) => s.get(bucket, key).await,
+            Store::Mssql(s) => s.object_exists(bucket, key, year).await,
+        }
+    }
 }
