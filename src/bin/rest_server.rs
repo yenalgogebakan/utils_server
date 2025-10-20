@@ -6,7 +6,7 @@ use libs::utils::appstate::appstate::SharedState;
 use libs::utils::database_manager;
 use libs::utils::object_store::object_store::Store;
 use libs::utils::object_store::opendal_mssql_wrapper::MssqlStore;
-use libs::utils::rest_handlers::download_docs_handler;
+use libs::utils::rest_handlers::{download_docs_handler;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -49,10 +49,15 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn create_app(state: SharedState) -> Router {
-    let api_v1 = Router::new().route(
-        "/download_docs",
-        get(download_docs_handler::download_docs_handler),
-    );
+    let api_v1 = Router::new()
+        .route(
+            "/download_docs",
+            get(download_docs_handler::download_docs_handler),
+        )
+        .route(
+            "get/docs_from_objstore",
+            get(download_docs_handler::download_docs_handler),
+        );
     //.route("/upload", post(upload_handler));
     // Main router
     Router::new()

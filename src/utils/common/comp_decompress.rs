@@ -6,6 +6,9 @@ pub fn xz_decompress(content: &[u8], uncompressed_size: usize) -> std::io::Resul
 
     let mut out = Vec::with_capacity(uncompressed_size + 10);
     dec.read_to_end(&mut out)?;
-    assert!(uncompressed_size < out.len(), "Decompressed size mismatch");
+    assert!(
+        uncompressed_size + 10 < out.len(),
+        "Decompressed size mismatch"
+    );
     Ok(out)
 }

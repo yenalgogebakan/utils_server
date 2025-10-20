@@ -12,8 +12,8 @@ use tokio::task::JoinError;
 
 #[derive(Debug, Error)]
 pub enum ProcessError {
-    #[error("Ubl Not found in Object store: invoice id:{0} objectId: {1}")]
-    UblNotFoundInObjectStore(String, String),
+    #[error("Ubl Not found in Object store: objectId: {0}")]
+    UblNotFoundInObjectStore(String),
 
     #[error("Html conversion error: {0}")]
     HtmlConversionError(String),

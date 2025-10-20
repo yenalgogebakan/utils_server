@@ -22,6 +22,7 @@ bb8 = "=0.9.0"
 bb8-tiberius = "0.16.0"
 serde = { version = "~1.0.219", features = ["derive"] } # A serialization/deserialization framework.
 serde_json = { version = "~1.0.140" } # Serde serialization/deserialization of JSON data.
+serde_with = { version = "3.9.1", features = ["base64"] }
 tokio = { version = "~1.45.1", features = ["full", "test-util"] } # Event-driven, non-blocking I/O platform.
 axum = { version = "~0.8.4" } # Web framework that focuses on ergonomics and modularity.
 tower = "0.4"
@@ -36,6 +37,8 @@ lazy_static = "1.4" # Optional, but good for compiling regex once
 once_cell = "1.19"
 roxmltree = "0.21"
 xz2 = "0.1"          # XZ/LZMA decode
+zip = "0.6"
+tar = "0.4"
 
 [dev-dependencies]
 axum-test = { version = "17.3.0" } # Library for writing tests for web servers written using Axum.

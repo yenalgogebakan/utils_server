@@ -47,7 +47,8 @@ pub struct DownloadDocsErrorResponse {
 pub async fn download_docs_handler(
     State(state): State<appstate::SharedState>,
     Json(request): Json<DownloadDocsRequest>,
-) -> Result<Json<DownloadDocsResponse>, (StatusCode, Json<DownloadDocsErrorResponse>)> {
+) -> Result<(StatusCode, Json<DownloadDocsResponse>), (StatusCode, Json<DownloadDocsErrorResponse>)>
+{
     println!(
         "📥 Download request: vkntckn={}, after_this={}, type={:?}",
         request.source_vkntckn, request.after_this, request.download_type
@@ -103,12 +104,15 @@ pub async fn download_docs_handler(
                 "✅ Processed {} invoices, size: {} bytes",
                 result.record_count, result.size_bytes
             );
-            return Ok(Json(DownloadDocsResponse {
-                data: result.data,
-                filename: result.filename,
-                record_count: result.record_count,
-                size_bytes: result.size_bytes,
-            }));
+            return Ok((
+                StatusCode::OK,
+                Json(DownloadDocsResponse {
+                    data: result.data,
+                    filename: result.filename,
+                    record_count: result.record_count,
+                    size_bytes: result.size_bytes,
+                }),
+            ));
         }
         Err(e) => {
             eprintln!("❌ Processing error: {}", e);
