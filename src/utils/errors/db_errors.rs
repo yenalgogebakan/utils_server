@@ -3,19 +3,16 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum DbError {
     // Pool builder failure:
-    #[error("bb8 pool build failed: {0}")]
+    #[error("bb8 pool error: {0}")]
     PoolBuild(#[from] bb8::RunError<bb8_tiberius::Error>),
 
     // Getting a connection, manager-level issues:
-    #[error("tiberius manager error: {0}")]
+    #[error("bb8 pool build failed: {0}")]
     Bb8Tiberius(#[from] bb8_tiberius::Error),
 
     // Direct Tiberius operation errors:
     #[error("tiberius error: {0}")]
     Tiberius(#[from] tiberius::error::Error),
-
-    #[error("invalid config: {0}")]
-    Config(&'static str),
 
     // 💥 Custom domain-specific variant
     #[error("wrong database name: expected '{expected}', got '{found}'")]

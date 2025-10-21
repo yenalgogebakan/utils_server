@@ -3,7 +3,7 @@ use bb8::Pool;
 use bb8_tiberius::ConnectionManager;
 use tiberius::{AuthMethod, Config};
 
-use crate::utils::errors::app_errors::{AppError, ErrCtx as AppErrCtx};
+//use crate::utils::errors::app_errors::{AppError, ErrCtx as AppErrCtx};
 use crate::utils::errors::db_errors::{DbError, ErrCtx as DbErrCtx};
 
 pub type ConnectionPool = Pool<ConnectionManager>;
@@ -40,11 +40,8 @@ pub async fn init_db_connection_pool(name: &str) -> Result<ConnectionPool, DbErr
     Ok(pool)
 }
 
-pub async fn init_db_connection_pools() -> Result<DbPools, AppError> {
-    let incoming_invoice_pool = init_db_connection_pool("object_pool")
-        .await
-        .map_err(AppError::from) // DbError -> AppError
-        .ctx("init_db_connection_pools/object")?;
+pub async fn init_db_connection_pools() -> Result<DbPools, DbError> {
+    let incoming_invoice_pool = init_db_connection_pool("incoming_invoice_pool").await?;
 
     /*
     let xslt_pool = init_db_connection_pool("xslt_pool")
@@ -64,14 +61,15 @@ pub async fn init_db_connection_pools() -> Result<DbPools, AppError> {
     })
 }
 
-fn check_database_name(db_name: String) -> Result<(), DbError> {
+pub fn check_database_name(db_name: String) -> Result<(), DbError> {
     let expected = "uut_24_6";
 
     if db_name != expected {
         return Err(DbError::WrongDatabaseName {
             expected,
             found: db_name.to_string(),
-        });
+        })
+        .ctx(format!("{}/{}", module_path!(), "check_database_name").leak());
     }
 
     Ok(())

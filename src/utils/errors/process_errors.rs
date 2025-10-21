@@ -9,11 +9,15 @@ use crate::utils::errors::object_store_errors::ObjectStoreError;
 use std::io;
 use thiserror::Error;
 use tokio::task::JoinError;
+use zip::result::ZipError;
 
 #[derive(Debug, Error)]
 pub enum ProcessError {
     #[error("Ubl Not found in Object store: objectId: {0}")]
     UblNotFoundInObjectStore(String),
+
+    #[error("DocsFromObjStore : do_process : Zip error: {0}")]
+    ZipError(#[from] ZipError),
 
     #[error("Html conversion error: {0}")]
     HtmlConversionError(String),

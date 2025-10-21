@@ -1,9 +1,15 @@
-use crate::utils::common::build_zip::{build_tzip, build_zip};
-use crate::utils::common::common_types_and_formats::XsltCache;
+use flate2::Compression;
+use flate2::write::GzEncoder;
+use std::io::{Cursor, Write};
+use tar::Builder as TarBuilder;
+use xz2::write::XzEncoder;
+use zip::{CompressionMethod, ZipWriter, write::FileOptions};
+
+//use crate::utils::common::common_types_and_formats::XsltCache;
 use crate::utils::common::download_types_and_formats::{
     DownloadFormat, DownloadType, FilenameInZipMode,
 };
-use crate::utils::errors::processing_errors::ProcessError;
+use crate::utils::errors::process_errors::ProcessError;
 use crate::utils::object_store::object_store::Store;
 use crate::utils::rest_handlers::docs_from_objstore_handler::{
     DocRequestItem, DocsFromObjStoreReq,
@@ -61,6 +67,7 @@ pub struct DocsFromObjStoreResult {
     pub docs_count: u32,
     pub size: u64,
     pub last_processed_sira_no: Option<i64>,
+    pub request_fully_completed: bool,
 }
 
 impl DocsFromObjStore {
@@ -68,58 +75,177 @@ impl DocsFromObjStore {
         &self,
         object_store: &Store,
     ) -> Result<DocsFromObjStoreResult, ProcessError> {
-        let mut processed: Vec<(String, Vec<u8>)> = Vec::new();
         let mut last_processed_sira_no = 0;
         let mut total_html_bytes = 0u64;
         let mut docs_count = 0u32;
 
-        let mut xlst_cache: XsltCache;
+        //let mut xlst_cache: XsltCache;
 
-        for item in &self.items {
-            match process_single_invoice_into_html(object_store, &self.year, &item.object_id).await
-            {
-                Ok(html) => {
-                    let len = html.len() as u64;
-                    if total_html_bytes + len > HTML_BYTES_LIMIT {
-                        break;
-                    }
-                    processed.push((self.filename_in_zip(item, docs_count), html));
-                    total_html_bytes += len;
-                    docs_count += 1;
-                    last_processed_sira_no = item.sira_no.unwrap_or_default();
+        match self.target_format {
+            DownloadFormat::Zip => {
+                let (mut zip, file_opts) = start_zip();
+                for item in &self.items {
+                    match process_single_invoice_into_html(
+                        object_store,
+                        &self.year,
+                        &item.object_id,
+                    )
+                    .await
+                    {
+                        Ok(html) => {
+                            let len = html.len() as u64;
+                            if total_html_bytes.saturating_add(len) > total_html_bytes {
+                                break;
+                            }
+                            zip.start_file(self.filename_in_zip(item, docs_count), file_opts)?;
+                            zip.write_all(&html)?;
+                            total_html_bytes += len;
+                            docs_count += 1;
+                            last_processed_sira_no = item.sira_no.unwrap_or_default();
+                        }
+                        Err(e) => match e {
+                            ProcessError::UblNotFoundInObjectStore(_) => {
+                                let data = finish_zip(zip).map_err(ProcessError::from)?;
+                                let size = data.len() as u64; // payload size
+                                return Ok(DocsFromObjStoreResult {
+                                    data,
+                                    docs_count,
+                                    size: size,
+                                    last_processed_sira_no: Some(last_processed_sira_no),
+                                    request_fully_completed: false,
+                                });
+                            }
+                            _ => {
+                                return Ok(DocsFromObjStoreResult::default());
+                            }
+                        },
+                    };
                 }
-                Err(e) => match e {
-                    ProcessError::UblNotFoundInObjectStore(_) => {
-                        let data = match self.target_format {
-                            DownloadFormat::Zip => build_zip(processed)?,
-                            DownloadFormat::TZip => build_tzip(processed)?,
-                            DownloadFormat::Gzip => build_zip(processed)?,
-                        };
-                        return Ok(DocsFromObjStoreResult {
-                            data,
-                            docs_count,
-                            size: total_html_bytes,
-                            last_processed_sira_no: Some(last_processed_sira_no),
-                        });
-                    }
-                    _ => {
-                        return Ok(DocsFromObjStoreResult::default());
-                    }
-                },
-            };
+                let data = finish_zip(zip).map_err(ProcessError::from)?;
+                let size = data.len() as u64; // payload size
+                return Ok(DocsFromObjStoreResult {
+                    data,
+                    docs_count,
+                    size: size,
+                    last_processed_sira_no: Some(last_processed_sira_no),
+                    request_fully_completed: true,
+                });
+            }
+            DownloadFormat::Tzip => {
+                let mut tar = start_tzip();
+                for item in &self.items {
+                    match process_single_invoice_into_html(
+                        object_store,
+                        &self.year,
+                        &item.object_id,
+                    )
+                    .await
+                    {
+                        Ok(html) => {
+                            let len = html.len() as u64;
+                            if total_html_bytes.saturating_add(len) > total_html_bytes {
+                                break;
+                            }
+                            let mut header = tar::Header::new_gnu();
+                            header.set_mode(0o644);
+                            header.set_size(len);
+                            header.set_cksum();
+                            tar.append_data(
+                                &mut header,
+                                self.filename_in_zip(item, docs_count),
+                                html.as_slice(),
+                            )
+                            .map_err(ProcessError::from)?;
+                            total_html_bytes += len;
+                            docs_count += 1;
+                            last_processed_sira_no = item.sira_no.unwrap_or_default();
+                        }
+                        Err(e) => match e {
+                            ProcessError::UblNotFoundInObjectStore(_) => {
+                                let data = finish_tzip(tar).map_err(ProcessError::from)?;
+                                let size = data.len() as u64;
+                                return Ok(DocsFromObjStoreResult {
+                                    data,
+                                    docs_count,
+                                    size: size,
+                                    last_processed_sira_no: Some(last_processed_sira_no),
+                                    request_fully_completed: false,
+                                });
+                            }
+                            _ => {
+                                return Ok(DocsFromObjStoreResult::default());
+                            }
+                        },
+                    };
+                }
+                let data = finish_tzip(tar).map_err(ProcessError::from)?;
+                let size = data.len() as u64;
+                return Ok(DocsFromObjStoreResult {
+                    data,
+                    docs_count,
+                    size: size,
+                    last_processed_sira_no: Some(last_processed_sira_no),
+                    request_fully_completed: false,
+                });
+            }
+            DownloadFormat::Gzip => {
+                let mut tar = start_targz();
+                for item in &self.items {
+                    match process_single_invoice_into_html(
+                        object_store,
+                        &self.year,
+                        &item.object_id,
+                    )
+                    .await
+                    {
+                        Ok(html) => {
+                            let len = html.len() as u64;
+                            if total_html_bytes.saturating_add(len) > total_html_bytes {
+                                break;
+                            }
+                            let mut header = tar::Header::new_gnu();
+                            header.set_mode(0o644);
+                            header.set_size(len);
+                            header.set_cksum();
+                            tar.append_data(
+                                &mut header,
+                                self.filename_in_zip(item, docs_count),
+                                html.as_slice(),
+                            )
+                            .map_err(ProcessError::from)?;
+                            total_html_bytes += len;
+                            docs_count += 1;
+                            last_processed_sira_no = item.sira_no.unwrap_or_default();
+                        }
+                        Err(e) => match e {
+                            ProcessError::UblNotFoundInObjectStore(_) => {
+                                let data = finish_targz(tar).map_err(ProcessError::from)?;
+                                let size = data.len() as u64;
+                                return Ok(DocsFromObjStoreResult {
+                                    data,
+                                    docs_count,
+                                    size: size,
+                                    last_processed_sira_no: Some(last_processed_sira_no),
+                                    request_fully_completed: false,
+                                });
+                            }
+                            _ => {
+                                return Ok(DocsFromObjStoreResult::default());
+                            }
+                        },
+                    };
+                }
+                let data = finish_targz(tar).map_err(ProcessError::from)?;
+                let size = data.len() as u64;
+                return Ok(DocsFromObjStoreResult {
+                    data,
+                    docs_count,
+                    size: size,
+                    last_processed_sira_no: Some(last_processed_sira_no),
+                    request_fully_completed: false,
+                });
+            }
         }
-
-        let data = match self.target_format {
-            DownloadFormat::Zip => build_zip(processed)?,
-            DownloadFormat::TZip => build_tzip(processed)?,
-            DownloadFormat::Gzip => build_zip(processed)?,
-        };
-        Ok(DocsFromObjStoreResult {
-            data,
-            docs_count,
-            size: total_html_bytes,
-            last_processed_sira_no: Some(last_processed_sira_no),
-        })
     }
 
     fn filename_in_zip(&self, item: &DocFromObjStoreItem, docs_count: u32) -> String {
@@ -143,6 +269,7 @@ pub async fn process_single_invoice_into_html(
     year: &String,
     path_in_object_store: &String, //key
 ) -> Result<Vec<u8>, ProcessError> {
+    print!("in process Single invoice into html");
     if !object_store
         .object_exists("ubls", path_in_object_store, year)
         .await?
@@ -153,4 +280,39 @@ pub async fn process_single_invoice_into_html(
     }
 
     Ok(Vec::new())
+}
+
+fn start_zip() -> (ZipWriter<Cursor<Vec<u8>>>, FileOptions) {
+    let cursor = Cursor::new(Vec::new());
+    let zip = ZipWriter::new(cursor);
+    let opts = FileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+    (zip, opts)
+}
+fn finish_zip(mut zip: ZipWriter<Cursor<Vec<u8>>>) -> std::io::Result<Vec<u8>> {
+    Ok(zip.finish()?.into_inner())
+}
+
+fn start_tzip() -> TarBuilder<XzEncoder<Cursor<Vec<u8>>>> {
+    let cursor = Cursor::new(Vec::new());
+    let xz = XzEncoder::new(cursor, 6);
+    TarBuilder::new(xz)
+}
+fn finish_tzip(tar: TarBuilder<XzEncoder<Cursor<Vec<u8>>>>) -> std::io::Result<Vec<u8>> {
+    let xz = tar.into_inner()?;
+    let cursor = xz.finish()?;
+    Ok(cursor.into_inner())
+}
+
+fn start_targz() -> TarBuilder<GzEncoder<Cursor<Vec<u8>>>> {
+    let cursor = Cursor::new(Vec::new());
+    let gz = GzEncoder::new(cursor, Compression::default());
+    TarBuilder::new(gz)
+}
+
+fn finish_targz(tar: TarBuilder<GzEncoder<Cursor<Vec<u8>>>>) -> std::io::Result<Vec<u8>> {
+    let gz = tar.into_inner()?;
+    let cursor = gz.finish()?;
+    Ok(cursor.into_inner())
 }

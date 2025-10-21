@@ -29,16 +29,16 @@ impl Default for DownloadType {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum DownloadFormat {
-    Zip,
-    Gzip,
-    TZip,
+    Zip,  // .zip
+    Tzip, // .tar.xz
+    Gzip, // .tar.gz  (multi-file via tar.gz)
 }
 impl fmt::Display for DownloadFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Zip => write!(f, "Zip"),
+            Self::Tzip => write!(f, "Tzip"),
             Self::Gzip => write!(f, "Gzip"),
-            Self::TZip => write!(f, "Tzip"),
         }
     }
 }

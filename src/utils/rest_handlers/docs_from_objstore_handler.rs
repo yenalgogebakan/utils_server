@@ -44,6 +44,7 @@ pub struct DocsFromObjStoreResponse {
     pub size: u64,
 
     pub last_processed_sira_no: Option<i64>,
+    pub request_fully_completed: bool,
 }
 
 /// ----- Error Response -----
@@ -63,14 +64,24 @@ pub async fn docs_from_objstore_handler(
     (StatusCode, Json<DocsFromObjStoreErrorResponse>),
 > {
     let process: DocsFromObjStore = request.into();
-
-    return Ok((
-        StatusCode::OK,
-        Json(DocsFromObjStoreResponse {
-            data: Vec::new(),
-            docs_count: 0,
-            size: 0,
-            last_processed_sira_no: None,
-        }),
-    ));
+    match process.do_process(&state.object_store).await {
+        Ok(docs_from_objstore_result) => Ok((
+            StatusCode::OK,
+            Json(DocsFromObjStoreResponse {
+                data: docs_from_objstore_result.data,
+                docs_count: docs_from_objstore_result.docs_count,
+                size: docs_from_objstore_result.size,
+                last_processed_sira_no: docs_from_objstore_result.last_processed_sira_no,
+                request_fully_completed: docs_from_objstore_result.request_fully_completed,
+            }),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(DocsFromObjStoreErrorResponse {
+                error: 1,
+                error_text: "Processing Error".to_string(),
+                error_msg: format!("{}", e),
+            }),
+        )),
+    }
 }

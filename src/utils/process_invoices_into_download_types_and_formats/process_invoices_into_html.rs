@@ -3,8 +3,8 @@ use crate::utils::common::{
     comp_decompress::xz_decompress, download_types_and_formats::DownloadFormat,
     processed_invoice_types::ProcessedInvoice, san_desanitize::sanitize_fast,
 };
-use crate::utils::errors::processing_errors::ProcessError;
-use crate::utils::errors::processing_errors::ProcessingError;
+use crate::utils::errors::process_errors::ProcessError;
+use crate::utils::errors::process_errors::ProcessingError;
 use crate::utils::incoming_invoice::incoming_invoice_rec::IncomingInvoiceRec;
 use crate::utils::object_store::{object_store::Store, opendal_mssql_wrapper::ObjectStoreRecord};
 use crate::utils::process_invoices_into_download_types_and_formats::process_invoices_types::ProcessInvoicesAccordingtoTypesAndFormatsResult;
@@ -35,11 +35,9 @@ pub async fn process_invoices_into_html(
             {
                 Ok(processed_invoice) => processed_invoice,
                 Err(e) => match e {
-                    ProcessError::UblNotFoundInObjectStore(invoice_id, object_id) => {
-                        let error_message = format!(
-                            "UBL not found in object store for invoice_id='{}', path='{}'",
-                            invoice_id, object_id
-                        );
+                    ProcessError::UblNotFoundInObjectStore(object_id) => {
+                        let error_message =
+                            format!("UBL not found in object store for  path='{}'", object_id);
                         let processing_error = ProcessingError {
                             invoice_id: invoice.invoice_id.clone(),
                             error_code: Some("UBLNOTFOUND".to_string()),
@@ -113,7 +111,6 @@ pub async fn process_single_invoice_into_html(
         .await?
     {
         return Err(ProcessError::UblNotFoundInObjectStore(
-            invoice_id.to_string(),
             path_in_object_store.to_string(),
         ));
     }

@@ -109,7 +109,7 @@ impl MssqlStore {
             .object_store_conn_pool
             .get()
             .await
-            .map_err(ObjectStoreError::from)
+            //.map_err(ObjectStoreError::from)
             .ctx("MsSqlStore : object_exists : get conn from pool")?;
 
         let sql_sentence = format!(

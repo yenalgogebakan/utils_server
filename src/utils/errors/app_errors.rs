@@ -1,14 +1,13 @@
 use crate::utils::errors::{
     db_errors::DbError, download_request_errors::DownloadRequestError,
-    object_store_errors::ObjectStoreError, processing_errors::ProcessError, xml_errors::XmlError,
+    object_store_errors::ObjectStoreError, process_errors::ProcessError, xml_errors::XmlError,
 };
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error(transparent)]
-    Db(#[from] DbError),
-
+    // #[error(transparent)]
+    // Db(#[from] DbError),
     #[error(transparent)]
     Xml(#[from] XmlError),
 
