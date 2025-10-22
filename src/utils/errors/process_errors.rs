@@ -13,8 +13,37 @@ use zip::result::ZipError;
 
 #[derive(Debug, Error)]
 pub enum ProcessError {
-    #[error("Ubl Not found in Object store: objectId: {0}")]
+    #[error("Ubl Not found in Object store: object_id: {0}")]
     UblNotFoundInObjectStore(String),
+
+    #[error("Failed to decompress XZ data for object '{object_id}': {source}")]
+    DecompressError {
+        object_id: String, // To hold the ID of the object
+        #[source] // Indicate that this is the underlying source error
+        source: io::Error,
+    },
+
+    #[error("Found no utf char, returning untouched '{object_id}': {source}")]
+    NonUtfCharError {
+        object_id: String, // To hold the ID of the object
+        #[source] // Indicate that this is the underlying source error
+        source: std::str::Utf8Error,
+    },
+
+    #[error("XML parse error: '{object_id}': {source}")]
+    XMLParseError {
+        object_id: String, // To hold the ID of the object
+        #[source] // Indicate that this is the underlying source error
+        source: roxmltree::Error,
+    },
+    #[error("EmbeddedDocumentBinaryObject not found: object_id: {0}")]
+    MissingNodeError(String),
+
+    #[error("EmbeddedDocumentBinaryObject node has no text in it: object_id: {0}")]
+    MissingTextInNodeError(String),
+
+    #[error("Xslt object id is invalid: object_id: {0}")]
+    InvalidXsltobjectIdError(String),
 
     #[error("DocsFromObjStore : do_process : Zip error: {0}")]
     ZipError(#[from] ZipError),
@@ -22,17 +51,14 @@ pub enum ProcessError {
     #[error("Html conversion error: {0}")]
     HtmlConversionError(String),
 
-    #[error("Found no utf char, returning untouched")]
-    NonUtfCharError(#[source] std::str::Utf8Error),
-
     #[error(transparent)]
-    ObjectStore(#[from] ObjectStoreError),
+    ObjectStoreError(#[from] ObjectStoreError),
 
     #[error(transparent)]
     Io(#[from] io::Error),
 
-    #[error("Decompression task failed")]
-    TaskJoin(#[source] JoinError),
+    #[error("Tokio Spawn sync could not join handle")]
+    TaskJoinError(#[source] JoinError),
 
     // Function context (preserves typed inner error)
     #[error("{func}: {source}")]

@@ -1,6 +1,7 @@
 use std::io::{Cursor, Read};
 use xz2::read::XzDecoder;
 
+pub const DECOMPRESS_ASYNC_THRESHOLD: i32 = 2 * 1024 * 1024; // 2MB
 pub fn xz_decompress(content: &[u8], uncompressed_size: usize) -> std::io::Result<Vec<u8>> {
     let mut dec = XzDecoder::new(Cursor::new(content));
 

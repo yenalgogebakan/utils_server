@@ -6,11 +6,15 @@ use xz2::write::XzEncoder;
 use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
 //use crate::utils::common::common_types_and_formats::XsltCache;
+use crate::utils::common::comp_decompress::{DECOMPRESS_ASYNC_THRESHOLD, xz_decompress};
 use crate::utils::common::download_types_and_formats::{
     DownloadFormat, DownloadType, FilenameInZipMode,
 };
+use crate::utils::common::san_desanitize::sanitize_fast;
+
+use crate::utils::docs_from_objstore::extract_xslt_key_from_xml::extract_xslt_key_from_xml;
 use crate::utils::errors::process_errors::ProcessError;
-use crate::utils::object_store::object_store::Store;
+use crate::utils::object_store::{object_store::Store, opendal_mssql_wrapper::ObjectStoreRecord};
 use crate::utils::rest_handlers::docs_from_objstore_handler::{
     DocRequestItem, DocsFromObjStoreReq,
 };
@@ -94,7 +98,7 @@ impl DocsFromObjStore {
                     {
                         Ok(html) => {
                             let len = html.len() as u64;
-                            if total_html_bytes.saturating_add(len) > total_html_bytes {
+                            if total_html_bytes + len > HTML_BYTES_LIMIT {
                                 break;
                             }
                             zip.start_file(self.filename_in_zip(item, docs_count), file_opts)?;
@@ -143,7 +147,7 @@ impl DocsFromObjStore {
                     {
                         Ok(html) => {
                             let len = html.len() as u64;
-                            if total_html_bytes.saturating_add(len) > total_html_bytes {
+                            if total_html_bytes + len > HTML_BYTES_LIMIT {
                                 break;
                             }
                             let mut header = tar::Header::new_gnu();
@@ -200,7 +204,7 @@ impl DocsFromObjStore {
                     {
                         Ok(html) => {
                             let len = html.len() as u64;
-                            if total_html_bytes.saturating_add(len) > total_html_bytes {
+                            if total_html_bytes + len > HTML_BYTES_LIMIT {
                                 break;
                             }
                             let mut header = tar::Header::new_gnu();
@@ -270,6 +274,8 @@ pub async fn process_single_invoice_into_html(
     path_in_object_store: &String, //key
 ) -> Result<Vec<u8>, ProcessError> {
     print!("in process Single invoice into html");
+
+    // Check if the compressed ubl exists
     if !object_store
         .object_exists("ubls", path_in_object_store, year)
         .await?
@@ -278,6 +284,72 @@ pub async fn process_single_invoice_into_html(
             path_in_object_store.to_string(),
         ));
     }
+    // get compressed ubl
+    let object_store_rec: ObjectStoreRecord = object_store
+        .get("ubls", &path_in_object_store, &year)
+        .await?;
+    let object_id_for_error = path_in_object_store.to_string();
+    let decompressed = if object_store_rec.original_size >= DECOMPRESS_ASYNC_THRESHOLD {
+        // Large file: offload to blocking thread
+        tokio::task::spawn_blocking(move || {
+            xz_decompress(
+                &object_store_rec.objcontent,
+                object_store_rec.original_size as usize,
+            )
+            .map_err(|e| ProcessError::DecompressError {
+                object_id: object_id_for_error,
+                source: e,
+            })
+        })
+        .await
+        .map_err(ProcessError::TaskJoinError)??
+    } else {
+        // Small file: decompress inline
+        xz_decompress(
+            &object_store_rec.objcontent,
+            object_store_rec.original_size as usize,
+        )
+        .map_err(|e| ProcessError::DecompressError {
+            // Construct the error manually
+            object_id: path_in_object_store.to_string(), // Use the object_id
+            source: e,                                   // The io::Error from xz_decompress
+        })?
+    };
+
+    let sanitized = sanitize_fast(&decompressed).map_err(|e| ProcessError::NonUtfCharError {
+        object_id: path_in_object_store.to_string(), // Use the object_id
+        source: e,                                   // The io::Error from xz_decompress
+    })?;
+
+    // we got xml
+    let xml: &str = std::str::from_utf8(sanitized.as_ref())
+        .expect("Sanitized data should be valid UTF-8 after passing through sanitize_fast");
+
+    let xslt_key = extract_xslt_key_from_xml(xml, &path_in_object_store)?;
+
+    /*
+        *     // Try compressed first
+        let key_xz = format!("{obj_id}.xz");
+        if store.object_exists(year, bucket, &key_xz)? {
+            let bytes = store.get_data(year, bucket, &key_xz)?;
+            let xslt = zx_decompress_to_utf8(&bytes)?;
+            return Ok(xslt);
+        }
+
+        // Fallback: uncompressed
+        if store.object_exists(year, bucket, obj_id)? {
+            let bytes = store.get_data(year, bucket, obj_id)?;
+            let xslt = String::from_utf8(bytes)?; // expect UTF-8 XSLT
+            return Ok(xslt);
+        }
+
+        Err(XsltResolveError::NotFound {
+            year,
+            bucket: bucket.to_string(),
+            key: obj_id.to_string(),
+        })
+    }
+        */
 
     Ok(Vec::new())
 }

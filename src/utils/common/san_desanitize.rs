@@ -17,13 +17,13 @@ fn is_xml_char(code: u32) -> bool {
 /// - Looks for numeric entities like &#x1F; or &#31;
 /// - Replaces only those *invalid for XML* with "-sanitized-$2--"
 /// - Returns input on errors (matching your try/catch)
-pub fn sanitize_fast<'a>(content: &'a [u8]) -> Result<Cow<'a, [u8]>, ProcessError> {
+pub fn sanitize_fast<'a>(content: &'a [u8]) -> Result<Cow<'a, [u8]>, std::str::Utf8Error> {
     const NO_SANITIZATION: bool = false;
     if NO_SANITIZATION {
         return Ok(Cow::Borrowed(content));
     }
 
-    let s = std::str::from_utf8(content).map_err(|e| ProcessError::NonUtfCharError(e))?;
+    let s = std::str::from_utf8(content)?;
 
     // Replace invalid entities
     let replaced = ENTITY_RE.replace_all(s, |caps: &regex::Captures| {

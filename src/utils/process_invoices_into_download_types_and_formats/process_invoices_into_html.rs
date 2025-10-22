@@ -126,7 +126,7 @@ pub async fn process_single_invoice_into_html(
             )
         })
         .await
-        .map_err(ProcessError::TaskJoin)??
+        .map_err(ProcessError::TaskJoinError)??
     } else {
         // Small file: decompress inline
         xz_decompress(
