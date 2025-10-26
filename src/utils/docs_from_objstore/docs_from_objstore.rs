@@ -1,18 +1,22 @@
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use std::collections::HashMap;
 use std::io::{Cursor, Write};
 use tar::Builder as TarBuilder;
 use xz2::write::XzEncoder;
 use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
-//use crate::utils::common::common_types_and_formats::XsltCache;
+use crate::utils::common::common_types_and_formats::{Xslt, XsltCache};
 use crate::utils::common::comp_decompress::{DECOMPRESS_ASYNC_THRESHOLD, xz_decompress};
 use crate::utils::common::download_types_and_formats::{
     DownloadFormat, DownloadType, FilenameInZipMode,
 };
 use crate::utils::common::san_desanitize::sanitize_fast;
 
-use crate::utils::docs_from_objstore::extract_xslt_key_from_xml::extract_xslt_key_from_xml;
+use crate::utils::docs_from_objstore::{
+    extract_xslt_key_from_xml::extract_xslt_key_from_xml,
+    get_xslt_from_objstore::get_xslt_from_objstore,
+};
 use crate::utils::errors::process_errors::ProcessError;
 use crate::utils::object_store::{object_store::Store, opendal_mssql_wrapper::ObjectStoreRecord};
 use crate::utils::rest_handlers::docs_from_objstore_handler::{
@@ -83,7 +87,7 @@ impl DocsFromObjStore {
         let mut total_html_bytes = 0u64;
         let mut docs_count = 0u32;
 
-        //let mut xlst_cache: XsltCache;
+        let mut xlst_cache: XsltCache = HashMap::with_capacity(4);
 
         match self.target_format {
             DownloadFormat::Zip => {
@@ -93,6 +97,7 @@ impl DocsFromObjStore {
                         object_store,
                         &self.year,
                         &item.object_id,
+                        &mut xlst_cache,
                     )
                     .await
                     {
@@ -142,6 +147,7 @@ impl DocsFromObjStore {
                         object_store,
                         &self.year,
                         &item.object_id,
+                        &mut xlst_cache,
                     )
                     .await
                     {
@@ -199,6 +205,7 @@ impl DocsFromObjStore {
                         object_store,
                         &self.year,
                         &item.object_id,
+                        &mut xlst_cache,
                     )
                     .await
                     {
@@ -271,7 +278,8 @@ impl DocsFromObjStore {
 pub async fn process_single_invoice_into_html(
     object_store: &Store,
     year: &String,
-    path_in_object_store: &String, //key
+    path_in_object_store: &String, // object_id
+    xslt_cache: &mut XsltCache,
 ) -> Result<Vec<u8>, ProcessError> {
     print!("in process Single invoice into html");
 
@@ -285,9 +293,8 @@ pub async fn process_single_invoice_into_html(
         ));
     }
     // get compressed ubl
-    let object_store_rec: ObjectStoreRecord = object_store
-        .get("ubls", &path_in_object_store, &year)
-        .await?;
+    let object_store_rec: ObjectStoreRecord =
+        object_store.get("ubls", path_in_object_store, year).await?;
     let object_id_for_error = path_in_object_store.to_string();
     let decompressed = if object_store_rec.original_size >= DECOMPRESS_ASYNC_THRESHOLD {
         // Large file: offload to blocking thread
@@ -311,8 +318,8 @@ pub async fn process_single_invoice_into_html(
         )
         .map_err(|e| ProcessError::DecompressError {
             // Construct the error manually
-            object_id: path_in_object_store.to_string(), // Use the object_id
-            source: e,                                   // The io::Error from xz_decompress
+            object_id: object_id_for_error.to_string(), // Use the object_id
+            source: e,                                  // The io::Error from xz_decompress
         })?
     };
 
@@ -326,30 +333,19 @@ pub async fn process_single_invoice_into_html(
         .expect("Sanitized data should be valid UTF-8 after passing through sanitize_fast");
 
     let xslt_key = extract_xslt_key_from_xml(xml, &path_in_object_store)?;
-
-    /*
-        *     // Try compressed first
-        let key_xz = format!("{obj_id}.xz");
-        if store.object_exists(year, bucket, &key_xz)? {
-            let bytes = store.get_data(year, bucket, &key_xz)?;
-            let xslt = zx_decompress_to_utf8(&bytes)?;
-            return Ok(xslt);
-        }
-
-        // Fallback: uncompressed
-        if store.object_exists(year, bucket, obj_id)? {
-            let bytes = store.get_data(year, bucket, obj_id)?;
-            let xslt = String::from_utf8(bytes)?; // expect UTF-8 XSLT
-            return Ok(xslt);
-        }
-
-        Err(XsltResolveError::NotFound {
-            year,
-            bucket: bucket.to_string(),
-            key: obj_id.to_string(),
-        })
+    // Look for cache if it already exists, if not get xslt from object store
+    if !xslt_cache.contains_key(&xslt_key) {
+        println!("Cache miss!");
+        let xslt_str = get_xslt_from_objstore(object_store, year, &xslt_key).await?;
+        xslt_cache.insert(
+            xslt_key.clone(),
+            Xslt {
+                xslt: xslt_str,
+                compiled_xslt: None,
+            },
+        );
     }
-        */
+    let xslt = xslt_cache.get(&xslt_key);
 
     Ok(Vec::new())
 }

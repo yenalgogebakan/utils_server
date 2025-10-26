@@ -39,6 +39,7 @@ roxmltree = "0.21"
 xz2 = "0.1"          # XZ/LZMA decode
 zip = "0.6"
 tar = "0.4"
+libxml = "0.3.8"
 
 [dev-dependencies]
 axum-test = { version = "17.3.0" } # Library for writing tests for web servers written using Axum.

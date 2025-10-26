@@ -16,6 +16,9 @@ pub enum ProcessError {
     #[error("Ubl Not found in Object store: object_id: {0}")]
     UblNotFoundInObjectStore(String),
 
+    #[error("Xslt Not found in Object store: object_id: {0}")]
+    XsltNotFoundInObjectStore(String),
+
     #[error("Failed to decompress XZ data for object '{object_id}': {source}")]
     DecompressError {
         object_id: String, // To hold the ID of the object
