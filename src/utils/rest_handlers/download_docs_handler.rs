@@ -8,8 +8,6 @@ use serde::Serialize;
 
 use crate::utils::appstate::appstate;
 use crate::utils::common::download_types_and_formats::{DownloadFormat, DownloadType};
-use crate::utils::incoming_invoice::get_incoming_invoice_recs_afterthis::get_incoming_invoice_recs_afterthis;
-use crate::utils::process_invoices_into_download_types_and_formats::process_invoices_accordingto_types_and_formats::process_invoices_accordingto_types_and_formats;
 
 // REST request and response structs
 #[derive(Serialize, serde::Deserialize, Debug, Clone)]
@@ -54,78 +52,86 @@ pub async fn download_docs_handler(
         request.source_vkntckn, request.after_this, request.download_type
     );
 
-    // At this point, we have the request and can query the database for invoice records. The dbname for INCOMING_INVOICES is "uut_24_6"
-    let dbname = "uut_24_6";
-    let invoices = match get_incoming_invoice_recs_afterthis(
-        &state.db_pools.incoming_invoice_pool,
-        &dbname,
-        &request.source_vkntckn,
-        request.after_this,
-    )
-    .await
-    {
-        Ok(invoices) => invoices,
-        Err(e) => match e {
-            _ => {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(DownloadDocsErrorResponse {
-                        error: "Internal Error".to_string(),
-                        message: format!("Error source: {}", e),
+    return Err((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(DownloadDocsErrorResponse {
+            error: "Internal Error".to_string(),
+            message: format!("Error source: "),
+        }),
+    ));
+    /*
+        // At this point, we have the request and can query the database for invoice records. The dbname for INCOMING_INVOICES is "uut_24_6"
+        let dbname = "uut_24_6";
+        let invoices = match get_incoming_invoice_recs_afterthis(
+            &state.db_pools.incoming_invoice_pool,
+            &dbname,
+            &request.source_vkntckn,
+            request.after_this,
+        )
+        .await
+        {
+            Ok(invoices) => invoices,
+            Err(e) => match e {
+                _ => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(DownloadDocsErrorResponse {
+                            error: "Internal Error".to_string(),
+                            message: format!("Error source: {}", e),
+                        }),
+                    ));
+                }
+            },
+        };
+        println!("✅ Found {} invoice records", invoices.len());
+        if invoices.is_empty() {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(DownloadDocsErrorResponse {
+                    error: "NoInvoices".to_string(),
+                    message: format!(
+                        "No invoices found for vkntckn {} after sirano {}",
+                        request.source_vkntckn, request.after_this
+                    ),
+                }),
+            ));
+        }
+
+        match process_invoices_accordingto_types_and_formats(
+            &state.object_store,
+            &invoices,
+            request.download_type,
+            request.format,
+        )
+        .await
+        {
+            Ok(result) => {
+                println!(
+                    "✅ Processed {} invoices, size: {} bytes",
+                    result.record_count, result.size_bytes
+                );
+                return Ok((
+                    StatusCode::OK,
+                    Json(DownloadDocsResponse {
+                        data: result.data,
+                        filename: result.filename,
+                        record_count: result.record_count,
+                        size_bytes: result.size_bytes,
                     }),
                 ));
             }
-        },
-    };
-    println!("✅ Found {} invoice records", invoices.len());
-    if invoices.is_empty() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(DownloadDocsErrorResponse {
-                error: "NoInvoices".to_string(),
-                message: format!(
-                    "No invoices found for vkntckn {} after sirano {}",
-                    request.source_vkntckn, request.after_this
-                ),
-            }),
-        ));
-    }
-
-    match process_invoices_accordingto_types_and_formats(
-        &state.object_store,
-        &invoices,
-        request.download_type,
-        request.format,
-    )
-    .await
-    {
-        Ok(result) => {
-            println!(
-                "✅ Processed {} invoices, size: {} bytes",
-                result.record_count, result.size_bytes
-            );
-            return Ok((
-                StatusCode::OK,
-                Json(DownloadDocsResponse {
-                    data: result.data,
-                    filename: result.filename,
-                    record_count: result.record_count,
-                    size_bytes: result.size_bytes,
-                }),
-            ));
+            Err(e) => {
+                eprintln!("❌ Processing error: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(DownloadDocsErrorResponse {
+                        error: "ProcessingError".to_string(),
+                        message: format!("Failed to process invoices: {}", e),
+                    }),
+                ));
+            }
         }
-        Err(e) => {
-            eprintln!("❌ Processing error: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(DownloadDocsErrorResponse {
-                    error: "ProcessingError".to_string(),
-                    message: format!("Failed to process invoices: {}", e),
-                }),
-            ));
-        }
-    }
-
+    */
     // This func is just debugging the json conversion and returning http response
     /*
     match convert_json_and_return_http_response(&request, &invoices) {

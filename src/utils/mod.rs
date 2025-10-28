@@ -6,5 +6,4 @@ pub mod docs_from_objstore;
 pub mod errors;
 pub mod incoming_invoice;
 pub mod object_store;
-pub mod process_invoices_into_download_types_and_formats;
 pub mod rest_handlers;

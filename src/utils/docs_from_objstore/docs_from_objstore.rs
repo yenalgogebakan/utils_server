@@ -6,12 +6,12 @@ use tar::Builder as TarBuilder;
 use xz2::write::XzEncoder;
 use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
-use crate::utils::common::common_types_and_formats::{Xslt, XsltCache};
 use crate::utils::common::comp_decompress::{DECOMPRESS_ASYNC_THRESHOLD, xz_decompress};
 use crate::utils::common::download_types_and_formats::{
     DownloadFormat, DownloadType, FilenameInZipMode,
 };
 use crate::utils::common::san_desanitize::sanitize_fast;
+use crate::utils::common::xslt_struct::XsltStruct;
 
 use crate::utils::docs_from_objstore::{
     extract_xslt_key_from_xml::extract_xslt_key_from_xml,
@@ -24,6 +24,9 @@ use crate::utils::rest_handlers::docs_from_objstore_handler::{
 };
 
 const HTML_BYTES_LIMIT: u64 = 1024 * 1024;
+const XSLT_CACHE_DIR: &str = "/tmp/xslt_cache_dir";
+
+pub type XsltCache = HashMap<String, XsltStruct>;
 
 #[derive(Debug, Clone)]
 pub struct DocFromObjStoreItem {
@@ -114,7 +117,7 @@ impl DocsFromObjStore {
                         }
                         Err(e) => match e {
                             ProcessError::UblNotFoundInObjectStore(_) => {
-                                let data = finish_zip(zip).map_err(ProcessError::from)?;
+                                let data = finish_zip(zip)?;
                                 let size = data.len() as u64; // payload size
                                 return Ok(DocsFromObjStoreResult {
                                     data,
@@ -130,7 +133,7 @@ impl DocsFromObjStore {
                         },
                     };
                 }
-                let data = finish_zip(zip).map_err(ProcessError::from)?;
+                let data = finish_zip(zip)?;
                 let size = data.len() as u64; // payload size
                 return Ok(DocsFromObjStoreResult {
                     data,
@@ -164,15 +167,14 @@ impl DocsFromObjStore {
                                 &mut header,
                                 self.filename_in_zip(item, docs_count),
                                 html.as_slice(),
-                            )
-                            .map_err(ProcessError::from)?;
+                            )?;
                             total_html_bytes += len;
                             docs_count += 1;
                             last_processed_sira_no = item.sira_no.unwrap_or_default();
                         }
                         Err(e) => match e {
                             ProcessError::UblNotFoundInObjectStore(_) => {
-                                let data = finish_tzip(tar).map_err(ProcessError::from)?;
+                                let data = finish_tzip(tar)?;
                                 let size = data.len() as u64;
                                 return Ok(DocsFromObjStoreResult {
                                     data,
@@ -188,14 +190,14 @@ impl DocsFromObjStore {
                         },
                     };
                 }
-                let data = finish_tzip(tar).map_err(ProcessError::from)?;
+                let data = finish_tzip(tar)?;
                 let size = data.len() as u64;
                 return Ok(DocsFromObjStoreResult {
                     data,
                     docs_count,
                     size: size,
                     last_processed_sira_no: Some(last_processed_sira_no),
-                    request_fully_completed: false,
+                    request_fully_completed: true,
                 });
             }
             DownloadFormat::Gzip => {
@@ -222,15 +224,14 @@ impl DocsFromObjStore {
                                 &mut header,
                                 self.filename_in_zip(item, docs_count),
                                 html.as_slice(),
-                            )
-                            .map_err(ProcessError::from)?;
+                            )?;
                             total_html_bytes += len;
                             docs_count += 1;
                             last_processed_sira_no = item.sira_no.unwrap_or_default();
                         }
                         Err(e) => match e {
                             ProcessError::UblNotFoundInObjectStore(_) => {
-                                let data = finish_targz(tar).map_err(ProcessError::from)?;
+                                let data = finish_targz(tar)?;
                                 let size = data.len() as u64;
                                 return Ok(DocsFromObjStoreResult {
                                     data,
@@ -246,14 +247,14 @@ impl DocsFromObjStore {
                         },
                     };
                 }
-                let data = finish_targz(tar).map_err(ProcessError::from)?;
+                let data = finish_targz(tar)?;
                 let size = data.len() as u64;
                 return Ok(DocsFromObjStoreResult {
                     data,
                     docs_count,
                     size: size,
                     last_processed_sira_no: Some(last_processed_sira_no),
-                    request_fully_completed: false,
+                    request_fully_completed: true,
                 });
             }
         }
@@ -298,13 +299,14 @@ pub async fn process_single_invoice_into_html(
     let object_id_for_error = path_in_object_store.to_string();
     let decompressed = if object_store_rec.original_size >= DECOMPRESS_ASYNC_THRESHOLD {
         // Large file: offload to blocking thread
+        let object_id_for_error_clone = object_id_for_error.clone();
         tokio::task::spawn_blocking(move || {
             xz_decompress(
                 &object_store_rec.objcontent,
                 object_store_rec.original_size as usize,
             )
             .map_err(|e| ProcessError::DecompressError {
-                object_id: object_id_for_error,
+                object_id: object_id_for_error_clone,
                 source: e,
             })
         })
@@ -318,14 +320,14 @@ pub async fn process_single_invoice_into_html(
         )
         .map_err(|e| ProcessError::DecompressError {
             // Construct the error manually
-            object_id: object_id_for_error.to_string(), // Use the object_id
-            source: e,                                  // The io::Error from xz_decompress
+            object_id: object_id_for_error.clone(), // Use the object_id
+            source: e,                              // The io::Error from xz_decompress
         })?
     };
 
     let sanitized = sanitize_fast(&decompressed).map_err(|e| ProcessError::NonUtfCharError {
-        object_id: path_in_object_store.to_string(), // Use the object_id
-        source: e,                                   // The io::Error from xz_decompress
+        object_id: object_id_for_error.clone(), // Use the object_id
+        source: e,                              // The io::Error from xz_decompress
     })?;
 
     // we got xml
@@ -337,15 +339,16 @@ pub async fn process_single_invoice_into_html(
     if !xslt_cache.contains_key(&xslt_key) {
         println!("Cache miss!");
         let xslt_str = get_xslt_from_objstore(object_store, year, &xslt_key).await?;
-        xslt_cache.insert(
-            xslt_key.clone(),
-            Xslt {
-                xslt: xslt_str,
-                compiled_xslt: None,
-            },
-        );
+        let xslt_struct = XsltStruct::new(xslt_str, XSLT_CACHE_DIR, &xslt_key).map_err(|e| {
+            ProcessError::XsltProcessingError {
+                object_id: object_id_for_error,
+                source: e,
+            }
+        })?;
+        xslt_cache.insert(xslt_key.clone(), xslt_struct);
     }
-    let xslt = xslt_cache.get(&xslt_key);
+    // Now do the exact conversion to HTML
+    //
 
     Ok(Vec::new())
 }

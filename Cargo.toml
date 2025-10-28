@@ -24,7 +24,7 @@ serde = { version = "~1.0.219", features = ["derive"] } # A serialization/deseri
 serde_json = { version = "~1.0.140" } # Serde serialization/deserialization of JSON data.
 serde_with = { version = "3.9.1", features = ["base64"] }
 tokio = { version = "~1.45.1", features = ["full", "test-util"] } # Event-driven, non-blocking I/O platform.
-axum = { version = "~0.8.4" } # Web framework that focuses on ergonomics and modularity.
+axum = { version = "~0.8.4" , features = ["macros"]} # Web framework that focuses on ergonomics and modularity.
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "compression-gzip"] }
 flate2 = "1.0"  # For zip compression
@@ -40,6 +40,9 @@ xz2 = "0.1"          # XZ/LZMA decode
 zip = "0.6"
 tar = "0.4"
 libxml = "0.3.8"
+libxslt = "0.1"
+tempfile = "3.23.0"
+
 
 [dev-dependencies]
 axum-test = { version = "17.3.0" } # Library for writing tests for web servers written using Axum.

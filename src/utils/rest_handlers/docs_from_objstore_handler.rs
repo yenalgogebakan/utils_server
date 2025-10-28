@@ -55,7 +55,7 @@ pub struct DocsFromObjStoreErrorResponse {
     pub error_text: String,
     pub error_msg: String,
 }
-
+#[axum::debug_handler]
 pub async fn docs_from_objstore_handler(
     State(state): State<appstate::SharedState>,
     Json(request): Json<DocsFromObjStoreReq>,

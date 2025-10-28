@@ -6,6 +6,7 @@ pub struct ProcessingError {
 }
 
 use crate::utils::errors::object_store_errors::ObjectStoreError;
+use crate::utils::errors::xslt_errors::XsltError;
 use std::io;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -39,6 +40,14 @@ pub enum ProcessError {
         #[source] // Indicate that this is the underlying source error
         source: roxmltree::Error,
     },
+
+    #[error("Xslt processing : '{object_id}': {source}")]
+    XsltProcessingError {
+        object_id: String, // To hold the ID of the object
+        #[source] // Indicate that this is the underlying source error
+        source: XsltError,
+    },
+
     #[error("EmbeddedDocumentBinaryObject not found: object_id: {0}")]
     MissingNodeError(String),
 

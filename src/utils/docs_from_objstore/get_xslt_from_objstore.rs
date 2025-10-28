@@ -1,6 +1,6 @@
 use crate::utils::common::comp_decompress::{DECOMPRESS_ASYNC_THRESHOLD, xz_decompress};
 use crate::utils::errors::process_errors::ProcessError;
-use crate::utils::object_store::{object_store::Store, opendal_mssql_wrapper::ObjectStoreRecord};
+use crate::utils::object_store::object_store::Store;
 
 pub async fn get_xslt_from_objstore(
     object_store: &Store,

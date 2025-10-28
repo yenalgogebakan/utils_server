@@ -151,6 +151,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a18ed336352031311f4e0b4dd2ff392d4fbb370777c9d18d7fc9d7359f73871"
 dependencies = [
  "axum-core",
+ "axum-macros",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -194,6 +195,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "604fde5e028fea851ce1d8570bbdc034bec850d157f7569d10f347d06808c05c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -1513,6 +1525,17 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "libxslt"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7192f60d89d6b195cb90e89464a644ac2bdc704dabb5de5279c539210ea2821"
+dependencies = [
+ "libc",
+ "libxml",
+ "pkg-config",
 ]
 
 [[package]]
@@ -3349,6 +3372,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "libxml",
+ "libxslt",
  "once_cell",
  "opendal",
  "regex",
@@ -3357,6 +3381,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "tar",
+ "tempfile",
  "thiserror 2.0.17",
  "tiberius",
  "tokio",
