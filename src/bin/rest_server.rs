@@ -36,10 +36,15 @@ async fn main() -> anyhow::Result<()> {
             .expect("Failed to init MSSQL store"),
     );
 
+    // Limit of concurrent heavy blocking tasks.
+    const MAX_BLOCKING_TASKS: usize = 64;
+
     let app_state = Arc::new(AppState {
         db_pools,
         object_store,
+        blocking_limiter: Arc::new(Semaphore::new(MAX_BLOCKING_TASKS)), // NEW
     });
+
     let app = create_app(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3090").await.unwrap();

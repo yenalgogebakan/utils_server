@@ -14,6 +14,9 @@ use zip::result::ZipError;
 
 #[derive(Debug, Error)]
 pub enum ProcessError {
+    #[error("error: {0}, error_text: {1}, error_msg: {2}")]
+    ServerBusyError(String, String, String),
+
     #[error("Ubl Not found in Object store: object_id: {0}")]
     UblNotFoundInObjectStore(String),
 
@@ -27,7 +30,7 @@ pub enum ProcessError {
         source: io::Error,
     },
 
-    #[error("Found no utf char, returning untouched '{object_id}': {source}")]
+    #[error("Found non utf char, returning untouched '{object_id}': {source}")]
     NonUtfCharError {
         object_id: String, // To hold the ID of the object
         #[source] // Indicate that this is the underlying source error
