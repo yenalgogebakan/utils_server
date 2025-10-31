@@ -43,7 +43,7 @@ impl MssqlStore {
             .object_store_conn_pool
             .get()
             .await
-            .map_err(ObjectStoreError::from)
+            //.map_err(ObjectStoreError::from)
             .ctx("MsSqlStore : get : get conn from pool")?;
 
         let sql_sentence = format!(
@@ -62,12 +62,12 @@ impl MssqlStore {
         let stream = query
             .query(&mut *conn)
             .await
-            .map_err(ObjectStoreError::from)
+            //.map_err(ObjectStoreError::from)
             .ctx("MsSqlStore : get : query")?;
         let rows = stream
             .into_first_result()
             .await
-            .map_err(ObjectStoreError::from)
+            //.map_err(ObjectStoreError::from)
             .ctx("MsSqlStore : get : stream")?;
 
         println!("number of rows: {}", rows.len());
@@ -126,12 +126,12 @@ impl MssqlStore {
         let stream = query
             .query(&mut *conn)
             .await
-            .map_err(ObjectStoreError::from)
+            //.map_err(ObjectStoreError::from)
             .ctx("MsSqlStore : get : query")?;
         let rows = stream
             .into_first_result()
             .await
-            .map_err(ObjectStoreError::from)
+            //.map_err(ObjectStoreError::from)
             .ctx("MsSqlStore : get : stream")?;
 
         println!("number of rows: {}", rows.len());

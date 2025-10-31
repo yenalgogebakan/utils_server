@@ -1,6 +1,6 @@
 use crate::utils::database_manager::init_database;
 use crate::utils::object_store::object_store::Store;
-use crate::utils::rest_handlers::{docs_from_objstore_spawn_handler, download_docs_handler};
+use crate::utils::rest_handlers::docs_from_objstore_spawn_handler;
 use axum::routing::*;
 use tokio::sync::Semaphore;
 
@@ -16,15 +16,10 @@ pub struct AppState {
 }
 
 pub fn create_app(state: SharedState) -> Router {
-    let api_v1 = Router::new()
-        .route(
-            "/download_docs",
-            get(download_docs_handler::download_docs_handler),
-        )
-        .route(
-            "/docs_from_objstore",
-            get(docs_from_objstore_spawn_handler::docs_from_objstore_spawn_handler),
-        );
+    let api_v1 = Router::new().route(
+        "/docs_from_objstore",
+        get(docs_from_objstore_spawn_handler::docs_from_objstore_spawn_handler),
+    );
     //.route("/upload", post(upload_handler));
     // Main router
     Router::new()

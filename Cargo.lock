@@ -3385,6 +3385,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tiberius",
  "tokio",
+ "tokio-util",
  "tower 0.4.13",
  "tower-http 0.5.2",
  "xz2",

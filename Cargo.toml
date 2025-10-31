@@ -24,6 +24,7 @@ serde = { version = "~1.0.219", features = ["derive"] } # A serialization/deseri
 serde_json = { version = "~1.0.140" } # Serde serialization/deserialization of JSON data.
 serde_with = { version = "3.9.1", features = ["base64"] }
 tokio = { version = "~1.45.1", features = ["full", "test-util"] } # Event-driven, non-blocking I/O platform.
+tokio-util = {version = "0.7.16"}
 axum = { version = "~0.8.4" , features = ["macros"]} # Web framework that focuses on ergonomics and modularity.
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "compression-gzip"] }

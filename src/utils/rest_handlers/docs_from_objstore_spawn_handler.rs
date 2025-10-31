@@ -12,6 +12,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as};
+use tokio_util::sync::CancellationToken;
 
 /// ----- Request -----
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,7 +30,7 @@ pub struct DocsFromObjStoreReq {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocRequestItem {
     pub object_id: String,
-    pub sira_no: Option<i64>,
+    pub sira_no: Option<u64>,
     pub invoice_no: Option<String>,
 }
 
@@ -48,7 +49,7 @@ pub struct DocsFromObjStoreResponse {
     /// Total byte size of the ZIP (or payload) in bytes
     pub size: u64,
 
-    pub last_processed_sira_no: Option<i64>,
+    pub last_processed_sira_no: Option<u64>,
     pub request_fully_completed: bool,
 }
 
@@ -90,10 +91,14 @@ pub async fn docs_from_objstore_spawn_handler(
             )
         })?;
 
+    let token = CancellationToken::new();
+    let token_for_worker = token.clone();
+    let _cancel_on_drop = token.drop_guard();
+
     let state_cloned = state.clone();
     let req_owned = request; // move
     let handle = tokio::task::spawn_blocking(move || {
-        process_docs_from_objstore_spawn(req_owned, state_cloned, permit)
+        process_docs_from_objstore_spawn(req_owned, state_cloned, permit, token_for_worker)
     });
 
     let response = handle

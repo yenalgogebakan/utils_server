@@ -1,12 +1,10 @@
-use axum::routing::*;
-use std::sync::Arc;
-
-use libs::utils::appstate::appstate::SharedState;
 use libs::utils::appstate::appstate::{AppState, create_app};
 use libs::utils::database_manager;
 use libs::utils::object_store::object_store::Store;
 use libs::utils::object_store::opendal_mssql_wrapper::MssqlStore;
-use libs::utils::rest_handlers::{docs_from_objstore_handler, download_docs_handler};
+
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -52,35 +50,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-
-/*
-pub fn create_app(state: SharedState) -> Router {
-    let api_v1 = Router::new()
-        .route(
-            "/download_docs",
-            get(download_docs_handler::download_docs_handler),
-        )
-        .route(
-            "/docs_from_objstore",
-            get(docs_from_objstore_handler::docs_from_objstore_handler),
-        );
-    //.route("/upload", post(upload_handler));
-    // Main router
-    Router::new()
-        .route("/healthcheck", get(health_check))
-        .nest("/api/v1", api_v1) // Version 1 of your API
-        .fallback(fallback)
-        .with_state(state)
-}
-
-/// axum handler for any request that fails to match the router routes.
-/// This implementation responds with HTTP status code NOT FOUND (404).
-pub async fn fallback(uri: axum::http::Uri) -> impl axum::response::IntoResponse {
-    eprint!("fallback");
-    (axum::http::StatusCode::NOT_FOUND, uri.to_string())
-}
-
-pub async fn health_check() -> Result<String, axum::http::StatusCode> {
-    Ok("Health : Ok".into())
-}
-*/
