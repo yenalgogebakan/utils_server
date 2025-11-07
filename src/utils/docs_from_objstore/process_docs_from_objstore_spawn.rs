@@ -165,7 +165,7 @@ fn transform_xml_to_html(
     year: &String,
     _item: &DocRequestItem,
 ) -> Result<Vec<u8>, DocProcessingError> {
-    get_ubl_decomp_from_object_store(object_store, year, &_item.object_id);
+    get_ubl_decomp_from_object_store(object_store, year, &_item.object_id).await;
 
     Ok(b"<html><body>ok</body></html>".to_vec())
 }

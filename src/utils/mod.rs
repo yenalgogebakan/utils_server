@@ -2,6 +2,7 @@ pub mod appstate;
 pub mod database_manager;
 //pub mod download_request;
 pub mod common;
+pub mod convert_invoices;
 pub mod docs_from_objstore;
 pub mod errors;
 pub mod incoming_invoice;
