@@ -2,6 +2,7 @@ pub mod app_errors;
 pub mod db_errors;
 pub mod download_request_errors;
 pub mod invoice_conversion_errors;
+pub mod log_error;
 pub mod object_store_errors;
 pub mod process_errors;
 pub mod xml_errors;

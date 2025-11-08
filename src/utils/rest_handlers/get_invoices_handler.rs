@@ -6,7 +6,6 @@ use crate::utils::convert_invoices::invoice_conversion_manager::{
     InvoiceConversionError, InvoiceConversionResult, InvoiceItemForConversion,
     InvoicesForConversion, convert_invoices,
 };
-use crate::utils::docs_from_objstore::process_docs_from_objstore_spawn::process_docs_from_objstore_spawn;
 use crate::utils::errors::invoice_conversion_errors::InvConvError;
 use axum::{
     Json,
@@ -16,6 +15,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as};
+use tokio_util::sync::CancellationToken;
 
 /// ----- Request Item -----
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,36 +103,55 @@ pub async fn get_invoices_handler(
     State(state): State<SharedState>,
     Json(request): Json<RequestInvoicesForConversion>,
 ) -> Result<(StatusCode, Json<ResponseInvoicesForConversion>), InvConvError> {
+    // Try to acquire without waiting; fail fast if saturated.
+    let permit = state
+        .blocking_limiter
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| {
+            InvConvError::ServerBusyError(
+                "Server is handling the maximum number of heavy tasks. Please retry.".to_string(),
+            )
+        })?;
+
+    let token = CancellationToken::new();
+    let _cancel_on_drop = token.clone().drop_guard(); // guard borrows a clone
+    let cancellation_token = token; // move the original downstream
+
     let request: InvoicesForConversion = request.into(); // convert
-    convert_invoices(state, request).await?;
+    let invoice_conversion_result: InvoiceConversionResult =
+        convert_invoices(state.clone(), request, permit, cancellation_token).await?;
 
-    let state_cloned = state.clone();
-    let req_owned = request; // move
-    let handle = tokio::task::spawn_blocking(move || {
-        process_docs_from_objstore_spawn(req_owned, state_cloned, permit, token_for_worker)
-    });
+    // Here means no fatal error
+    match invoice_conversion_result.request_fully_completed {
+        true => Ok((StatusCode::OK, Json(invoice_conversion_result.into()))),
+        false => Ok((
+            StatusCode::PARTIAL_CONTENT,
+            Json(invoice_conversion_result.into()),
+        )),
+    }
 
-    let response = handle
-            .await
-            .map_err(|join_err| {
-                if join_err.is_panic() {
-                    //log::error!("Blocking task panicked: {:?}", join_err);
-                    InvConvError::TaskJoinError(
-                        "Internal error: task panicked during processing".to_string()
-                    )
-                } else if join_err.is_cancelled() {
-                    //log::warn!("Blocking task was cancelled");
-                    InvConvError::TaskJoinError(
-                        "Task was cancelled".to_string()
-                    )
-                } else {
-                    //log::error!("Blocking task failed: {:?}", join_err);
-                    InvConvError::TaskJoinError(
-                        format!("Task execution failed: {}", join_err)
-                    )
-                }
-            })?  // First ? handles JoinError
-            ?;
-
-    Ok((StatusCode::OK, Json(response)))
+    /*
+        let response = handle
+                .await
+                .map_err(|join_err| {
+                    if join_err.is_panic() {
+                        //log::error!("Blocking task panicked: {:?}", join_err);
+                        InvConvError::TaskJoinError(
+                            "Internal error: task panicked during processing".to_string()
+                        )
+                    } else if join_err.is_cancelled() {
+                        //log::warn!("Blocking task was cancelled");
+                        InvConvError::TaskJoinError(
+                            "Task was cancelled".to_string()
+                        )
+                    } else {
+                        //log::error!("Blocking task failed: {:?}", join_err);
+                        InvConvError::TaskJoinError(
+                            format!("Task execution failed: {}", join_err)
+                        )
+                    }
+                })?  // First ? handles JoinError
+                ?;
+    */
 }

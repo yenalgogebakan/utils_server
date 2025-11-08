@@ -6,6 +6,7 @@ use crate::utils::common::download_types_and_formats::{
 use crate::utils::common::san_desanitize::sanitize_fast;
 use crate::utils::convert_invoices::convert_and_zip_worker::convert_and_zip;
 use crate::utils::errors::invoice_conversion_errors::{ErrCtx, InvConvError};
+use crate::utils::errors::log_error::log_error;
 use crate::utils::object_store::opendal_mssql_wrapper::ObjectStoreRecord;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -69,93 +70,154 @@ pub type XsltCache = HashMap<String, Vec<u8>>;
 pub async fn convert_invoices(
     state: SharedState,
     conversion_request: InvoicesForConversion,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    cancellation_token: CancellationToken,
 ) -> Result<InvoiceConversionResult, InvConvError> {
     let mut xlst_cache: XsltCache = HashMap::with_capacity(4);
     let filename_in_zip_mode: FilenameInZipMode = conversion_request.filename_in_zip;
 
-    // Try to acquire without waiting; fail fast if saturated.
-    let permit = state
-        .blocking_limiter
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| {
-            InvConvError::ServerBusyError(
-                "Server is handling the maximum number of heavy tasks. Please retry.".to_string(),
-            )
-        })?;
-
-    let token = CancellationToken::new();
-    let token_for_worker = token.clone();
-    let _cancel_on_drop = token.drop_guard();
+    let (tx_jobs, rx_jobs) = mpsc::channel::<InvoiceConversionJob>(8); // Vec will hold the Zipped data
 
     let state_cloned = state.clone();
 
-    let (tx_jobs, rx_jobs) = mpsc::channel::<(InvoiceConversionJob, Vec<u8>)>(8); // Vec will hold the Zipped data
-
+    let worker_token = CancellationToken::new();
+    let worker_cancellation_token = worker_token.clone(); // move the original downstream
     let handle = tokio::task::spawn_blocking(move || {
-        convert_and_zip(
-            rx_jobs,
-            state_cloned,
-            permit,
-            token_for_worker,
-            filename_in_zip_mode,
-        )
+        convert_and_zip(rx_jobs, state_cloned, worker_token, filename_in_zip_mode)
     });
 
     let object_store = &state.object_store;
     for (idx, item) in conversion_request.items.iter().enumerate() {
+        if cancellation_token.is_cancelled() {
+            worker_cancellation_token.cancel();
+            drop(tx_jobs);
+            return Err(InvConvError::ClientDisconnectedError(
+                "Client disconnected, task canceled".to_string(),
+            ))
+            .ctx("convert_invoices:process cancelled");
+        }
         // Check if the compressed ubl exists
         if !object_store
             .object_exists("ubls", &item.object_id, &conversion_request.year)
             .await?
         {
-            return Err(InvConvError::UblNotFoundInObjectStore(item.object_id));
+            let err = InvConvError::UblNotFoundInObjectStore(item.object_id.clone());
+            log_error(&err);
+            // stop the pipeline
+            worker_cancellation_token.cancel();
+            drop(tx_jobs);
+
+            let worker_res = handle
+                .await
+                .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+
+            if err.is_fatal() {
+                return Err(err).ctx("convert_invoices");
+            } else {
+                return worker_res;
+            }
         }
         // get compressed ubl
-        let object_store_rec: ObjectStoreRecord = object_store
+        let object_store_rec = match object_store
             .get("ubls", &item.object_id, &conversion_request.year)
-            .await?;
+            .await
+        {
+            Ok(rec) => rec, // <— bind and continue below
+            Err(err) => {
+                let inv_err: InvConvError = err.into();
+                log_error(&inv_err);
 
-        let object_id_for_error_clone = item.object_id.clone();
-        let decompressed = if object_store_rec.original_size >= DECOMPRESS_ASYNC_THRESHOLD {
+                // stop the pipeline
+                worker_cancellation_token.cancel();
+                drop(tx_jobs);
+
+                // wait worker to finalize/stop
+                let worker_res = handle
+                    .await
+                    .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+
+                if inv_err.is_fatal() {
+                    return Err(inv_err).ctx("convert_invoices"); // no body
+                } else {
+                    return worker_res; // partial body from worker
+                }
+            }
+        };
+        if cancellation_token.is_cancelled() {
+            worker_cancellation_token.cancel();
+            drop(tx_jobs);
+            return Err(InvConvError::ClientDisconnectedError(
+                "Client disconnected, task canceled".to_string(),
+            ))
+            .ctx("convert_invoices:process cancelled");
+        }
+
+        let original_size = object_store_rec.original_size as usize;
+        let decompressed: Vec<u8> = if object_store_rec.original_size >= DECOMPRESS_ASYNC_THRESHOLD
+        {
             // Large file: offload to blocking thread
-            tokio::task::spawn_blocking(move || {
-                xz_decompress(
-                    &object_store_rec.objcontent,
-                    object_store_rec.original_size as usize,
-                )
-                .map_err(|e| InvConvError::DecompressError {
-                    object_id: object_id_for_error_clone,
-                    source: e,
+            let obj_bytes = object_store_rec.objcontent;
+            let object_id_clone = item.object_id.clone();
+
+            // JoinHandle<Result<Vec<u8>, InvConvError>>
+            let join_out = tokio::task::spawn_blocking(move || {
+                xz_decompress(&obj_bytes, original_size).map_err(|e| {
+                    InvConvError::DecompressError {
+                        object_id: object_id_clone,
+                        source: e,
+                    }
                 })
             })
             .await
-            .map_err(|join_err| {
-                InvConvError::TaskJoinError(format!(
-                    "Task join error for object id: {}",
-                    object_id_for_error_clone
-                ))
-            })
-            .ctx("convert_invoices")??
+            .map_err(|e| InvConvError::TaskJoinError(e.to_string()))
+            .ctx("convert_invoices")?;
+
+            match join_out {
+                Ok(bytes) => bytes, // happy path
+                Err(inv_err) => {
+                    // ❌ DecompressError from worker = NON-FATAL → stop pipeline and return partial
+                    // (If some other InvConvError variant could appear here and should be fatal,
+                    //  you can branch on it; for now treat all here as non-fatal as per your rule.)
+                    log_error(&inv_err);
+                    worker_cancellation_token.cancel();
+                    drop(tx_jobs);
+
+                    let worker_res = handle
+                        .await
+                        .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+                    return worker_res; // partial result (request_fully_completed = false)
+                }
+            }
         } else {
-            // Small file: decompress inline
-            xz_decompress(
-                &object_store_rec.objcontent,
-                object_store_rec.original_size as usize,
-            )
-            .map_err(|e| InvConvError::DecompressError {
-                // Construct the error manually
-                object_id: object_id_for_error_clone, // Use the object_id
-                source: e,                            // The io::Error from xz_decompress
-            })?
+            // SMALL: inline decompress; classify errors as NON-FATAL
+            match xz_decompress(&object_store_rec.objcontent, original_size) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    let inv_err = InvConvError::DecompressError {
+                        object_id: item.object_id.clone(),
+                        source: e,
+                    };
+                    log_error(&inv_err);
+
+                    // stop pipeline and return partial
+                    worker_cancellation_token.cancel();
+                    drop(tx_jobs);
+
+                    let worker_res = handle
+                        .await
+                        .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+                    return worker_res; // partial result
+                }
+            }
         };
 
         let sanitized =
             sanitize_fast(&decompressed).map_err(|e| InvConvError::NonUtfCharError {
-                object_id: object_id_for_error_clone,
+                object_id: item.object_id.clone(),
                 source: e,
             })?;
     }
+    /*
     for it in request.items.iter().cloned() {
         // async I/O (DB/object store)
         let xml = state
@@ -177,7 +239,7 @@ pub async fn convert_invoices(
         }
     }
     drop(tx_jobs); // signal EOF
-
+    */
     // Placeholder implementation
     Ok(InvoiceConversionResult {
         data: Vec::new(),

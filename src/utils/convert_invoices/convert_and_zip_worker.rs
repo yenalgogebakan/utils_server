@@ -15,9 +15,8 @@ use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
 /// ---- blocking worker ----
 pub fn convert_and_zip(
-    mut rx: mpsc::Receiver<(InvoiceConversionJob, Vec<u8>)>,
+    mut rx: mpsc::Receiver<InvoiceConversionJob>,
     state: SharedState,
-    _permit: OwnedSemaphorePermit, // keep as parameter so it's dropped when this fn returns
     cancel: CancellationToken,
     filename_in_zip_mode: FilenameInZipMode,
 ) -> Result<InvoiceConversionResult, InvConvError> {
