@@ -5,11 +5,12 @@ use crate::utils::common::download_types_and_formats::{
 };
 use crate::utils::common::san_desanitize::sanitize_fast;
 use crate::utils::convert_invoices::convert_and_zip_worker::convert_and_zip;
+use crate::utils::convert_invoices::extract_xslt_key_from_xml::extract_xslt_key_from_xml;
 use crate::utils::errors::invoice_conversion_errors::{ErrCtx, InvConvError};
 use crate::utils::errors::log_error::log_error;
-use crate::utils::object_store::opendal_mssql_wrapper::ObjectStoreRecord;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -58,14 +59,20 @@ impl From<InvConvError> for InvoiceConversionError {
     }
 }
 
-/// ----- Worker channel send struct -----
+/// Work item sent from the async producer to the blocking worker.
+///
+/// - `xml_data` must be the **sanitized** XML bytes to transform.
+/// - `xslt_key` identifies the stylesheet for caching/reuse on the worker.
+/// - `xslt_data` is **Some** only the first time a given `xslt_key` appears,
+///   carrying the stylesheet bytes; subsequent jobs with the same key set it to `None`.
 pub struct InvoiceConversionJob {
-    pub item: InvoiceItemForConversion,
-    pub xml_data: Vec<u8>,
-    pub xslt_data: Option<Vec<u8>>,
+    pub item: InvoiceItemForConversion, // owned clone; channel requires 'static
+    pub xml_data: Vec<u8>,              // sanitized XML bytes
+    pub xslt_key: String,               // object-store key / identifier
+    pub xslt_data: Option<Arc<[u8]>>,   // stylesheet bytes (first send only)
 }
 
-pub type XsltCache = HashMap<String, Vec<u8>>;
+pub type XsltCache = HashMap<String, Arc<[u8]>>;
 
 pub async fn convert_invoices(
     state: SharedState,
@@ -143,6 +150,7 @@ pub async fn convert_invoices(
                 }
             }
         };
+        /*
         if cancellation_token.is_cancelled() {
             worker_cancellation_token.cancel();
             drop(tx_jobs);
@@ -151,7 +159,7 @@ pub async fn convert_invoices(
             ))
             .ctx("convert_invoices:process cancelled");
         }
-
+        */
         let original_size = object_store_rec.original_size as usize;
         let decompressed: Vec<u8> = if object_store_rec.original_size >= DECOMPRESS_ASYNC_THRESHOLD
         {
@@ -211,35 +219,73 @@ pub async fn convert_invoices(
             }
         };
 
-        let sanitized =
-            sanitize_fast(&decompressed).map_err(|e| InvConvError::NonUtfCharError {
-                object_id: item.object_id.clone(),
-                source: e,
-            })?;
+        let sanitized: std::borrow::Cow<'_, [u8]> = match sanitize_fast(&decompressed) {
+            Ok(s) => s,
+            Err(e) => {
+                let inv_err = InvConvError::NonUtfCharError {
+                    object_id: item.object_id.clone(),
+                    source: e,
+                };
+                log_error(&inv_err);
+
+                // stop pipeline and return partial
+                worker_cancellation_token.cancel();
+                drop(tx_jobs);
+
+                let worker_res = handle
+                    .await
+                    .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+                return worker_res; // partial result
+            }
+        };
+        // This does NOT copy; it just validates UTF-8 once.
+        /*
+        let sanitized_str: &str = match std::str::from_utf8(&sanitized) {
+            Ok(s) => s,
+            Err(e) => {
+                // If sanitize_fast guarantees UTF-8, you can `unreachable!()` here;
+                // otherwise treat as the same non-fatal path:
+                let inv_err = InvConvError::NonUtfCharError {
+                    object_id: item.object_id.clone(),
+                    source: e.into(),
+                };
+                log_error(&inv_err);
+                worker_cancellation_token.cancel();
+                drop(tx_jobs);
+                let worker_res = handle
+                    .await
+                    .map_err(|je| InvConvError::TaskJoinError(je.to_string()))?;
+                return worker_res;
+            }
+        };
+        */
+
+        //extract xslt key
+        let xslt_key: String = match extract_xslt_key_from_xml(sanitized, &item.object_id) {
+            Ok(k) => k,
+            Err(e) => {
+                log_error(&e);
+
+                // stop the pipeline
+                worker_cancellation_token.cancel();
+                drop(tx_jobs);
+
+                // wait worker to finalize/stop
+                let worker_res = handle
+                    .await
+                    .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+
+                if e.is_fatal() {
+                    return Err(e).ctx("convert_invoices"); // no body
+                } else {
+                    return worker_res; // partial body from worker
+                }
+            }
+        };
+
+        // get xslt from cache or objstore
     }
-    /*
-    for it in request.items.iter().cloned() {
-        // async I/O (DB/object store)
-        let xml = state
-            .obj_store
-            .get_xml_async(&it.object_id)
-            .await
-            .map_err(|e| DocProcessingError::Context {
-                func: "get_xml_async",
-                source: Box::new(e.into()),
-            })?;
-        if tx_jobs.send((it, xml)).await.is_err() {
-            // worker gone (cancellation or fatal); stop producing
-            break;
-        }
-        if token.is_cancelled() {
-            return Err(DocProcessingError::ClientDisconnectedError(
-                "cancelled".into(),
-            ));
-        }
-    }
-    drop(tx_jobs); // signal EOF
-    */
+
     // Placeholder implementation
     Ok(InvoiceConversionResult {
         data: Vec::new(),

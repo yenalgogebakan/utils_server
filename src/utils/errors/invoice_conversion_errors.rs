@@ -62,6 +62,22 @@ pub enum InvConvError {
         source: std::str::Utf8Error,
     },
 
+    #[error("XML parse error: '{object_id}': {source}")]
+    XMLParseError {
+        object_id: String, // To hold the ID of the object
+        #[source] // Indicate that this is the underlying source error
+        source: roxmltree::Error,
+    },
+
+    #[error("EmbeddedDocumentBinaryObject not found: object_id: {0}")]
+    MissingNodeError(String),
+
+    #[error("EmbeddedDocumentBinaryObject node has no text in it: object_id: {0}")]
+    MissingTextInNodeError(String),
+
+    #[error("Xslt object id is invalid: object_id: {0}")]
+    InvalidXsltobjectIdError(String),
+
     // Function context (preserves typed inner error)
     #[error("{func}: {source}")]
     Context {
@@ -96,6 +112,7 @@ impl InvConvError {
             InvConvError::UblNotFoundInObjectStore(_) => 2003,
             InvConvError::DecompressError { .. } => 2004,
             InvConvError::NonUtfCharError { .. } => 2005,
+            InvConvError::XMLParseError { .. } => 2006,
             InvConvError::Context { source, .. } => source.error_code(),
         }
     }
