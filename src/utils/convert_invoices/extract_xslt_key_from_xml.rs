@@ -1,11 +1,22 @@
 use crate::utils::errors::invoice_conversion_errors::{ErrCtx, InvConvError};
 use roxmltree::Document;
+use tokio_util::bytes;
 
 const CBC_NS: &str = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2";
 const LOCAL: &str = "EmbeddedDocumentBinaryObject";
 
-pub fn extract_xslt_key_from_xml(xml: &str, object_id: &str) -> Result<String, InvConvError> {
-    let doc = Document::parse(xml)
+pub fn extract_xslt_key_from_xml(
+    xml_bytes_owned: bytes::Bytes,
+    object_id: &str,
+) -> Result<String, InvConvError> {
+    let xml_str = std::str::from_utf8(xml_bytes_owned.as_ref())
+        .map_err(|e| InvConvError::NonUtfCharError {
+            object_id: object_id.to_string(),
+            source: e,
+        })
+        .ctx("extract_xslt_key_from_xml")?;
+
+    let doc = Document::parse(xml_str)
         .map_err(|e| InvConvError::XMLParseError {
             object_id: object_id.to_string(),
             source: e,

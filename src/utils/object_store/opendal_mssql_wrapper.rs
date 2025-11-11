@@ -8,13 +8,14 @@ use bb8::Pool;
 use bb8_tiberius::ConnectionManager;
 use chrono::NaiveDateTime;
 use tiberius::Query;
+use tokio_util::bytes;
 
 #[derive(Debug, Clone)]
 pub struct ObjectStoreRecord {
     pub bucket: String,
     pub object_id: String,
     pub metadata: Vec<u8>,
-    pub objcontent: Vec<u8>,
+    pub objcontent: bytes::Bytes,
     pub original_size: i32,
     pub compressed_size: i32,
     pub lmts: NaiveDateTime,
@@ -93,7 +94,7 @@ impl MssqlStore {
             bucket: bucket.to_string(),
             object_id: key.to_string(),
             metadata: vec![],
-            objcontent: object_content.to_vec(),
+            objcontent: object_content.to_vec().into(),
             original_size: original_size,
             compressed_size: compressed_size,
             lmts: chrono::Local::now().naive_local(),

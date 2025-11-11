@@ -55,6 +55,15 @@ pub enum InvConvError {
         source: io::Error,
     },
 
+    #[error("Timeout in decompress XZ data for object '{object_id}': '{timeout_secs}'")]
+    DecompressTimeout {
+        object_id: String, // To hold the ID of the object
+        timeout_secs: u32,
+    },
+
+    #[error("Decompression cancelled object_id: {0}")]
+    DecompressCancelled(String),
+
     #[error("Found non utf char, returning untouched '{object_id}': {source}")]
     NonUtfCharError {
         object_id: String, // To hold the ID of the object
@@ -113,6 +122,11 @@ impl InvConvError {
             InvConvError::DecompressError { .. } => 2004,
             InvConvError::NonUtfCharError { .. } => 2005,
             InvConvError::XMLParseError { .. } => 2006,
+            InvConvError::MissingNodeError(_) => 2007,
+            InvConvError::MissingTextInNodeError(_) => 2008,
+            InvConvError::InvalidXsltobjectIdError(_) => 2009,
+            InvConvError::DecompressTimeout { .. } => 2010,
+            InvConvError::DecompressCancelled(_) => 2011,
             InvConvError::Context { source, .. } => source.error_code(),
         }
     }

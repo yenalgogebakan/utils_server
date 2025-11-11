@@ -1,6 +1,7 @@
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::borrow::Cow;
+use tokio_util::bytes;
 
 static ENTITY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"&#((x[0-9A-Fa-f]+|\d+));").unwrap());
 #[inline]
@@ -16,13 +17,14 @@ fn is_xml_char(code: u32) -> bool {
 /// - Looks for numeric entities like &#x1F; or &#31;
 /// - Replaces only those *invalid for XML* with "-sanitized-$2--"
 /// - Returns input on errors (matching your try/catch)
-pub fn sanitize_fast<'a>(content: &'a [u8]) -> Result<Cow<'a, [u8]>, std::str::Utf8Error> {
+pub fn sanitize_fast(content_bytes: bytes::Bytes) -> Result<bytes::Bytes, std::str::Utf8Error> {
     const NO_SANITIZATION: bool = false;
-    if NO_SANITIZATION {
-        return Ok(Cow::Borrowed(content));
-    }
 
-    let s = std::str::from_utf8(content)?;
+    let s = std::str::from_utf8(content_bytes.as_ref())?;
+
+    if NO_SANITIZATION {
+        return Ok(content_bytes);
+    }
 
     // Replace invalid entities
     let replaced = ENTITY_RE.replace_all(s, |caps: &regex::Captures| {
@@ -42,7 +44,7 @@ pub fn sanitize_fast<'a>(content: &'a [u8]) -> Result<Cow<'a, [u8]>, std::str::U
 
     // Return based on whether replacements were made
     match replaced {
-        Cow::Borrowed(_) => Ok(Cow::Borrowed(content)), // No replacements: zero-copy!
-        Cow::Owned(s) => Ok(Cow::Owned(s.into_bytes())), // Replacements made: owned data
+        Cow::Borrowed(_) => Ok(content_bytes), // No replacements: zero-copy!
+        Cow::Owned(s) => Ok(bytes::Bytes::from(s.into_bytes())), // Replacements made: owned data
     }
 }
