@@ -3,7 +3,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::get_ubl_decomp_from_objstore::get_ubl_decomp_from_object_store;
 use crate::utils::appstate::appstate::SharedState;
-use crate::utils::common::download_types_and_formats::{
+use crate::utils::common::target_types_and_formats::{
     DownloadFormat, DownloadType, FilenameInZipMode,
 };
 use crate::utils::errors::doc_processing_errors::{DocProcessingError, ErrCtx};

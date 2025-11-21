@@ -1,6 +1,6 @@
 use crate::utils::appstate::appstate::SharedState;
-use crate::utils::common::download_types_and_formats::{
-    DownloadFormat, DownloadType, FilenameInZipMode,
+use crate::utils::common::target_types_and_formats::{
+    FilenameInZipMode, TargetCompressionType, TargetType,
 };
 use crate::utils::convert_invoices::invoice_conversion_manager::{
     InvoiceConversionError, InvoiceConversionResult, InvoiceItemForConversion,
@@ -36,8 +36,8 @@ impl From<RequestInvoiceItemForConversion> for InvoiceItemForConversion {
 /// ----- Request -----
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestInvoicesForConversion {
-    pub target_type: DownloadType,
-    pub target_format: DownloadFormat,
+    pub target_type: TargetType,
+    pub target_compression_type: TargetCompressionType,
     pub year: String,
     #[serde(default)]
     pub filename_in_zip: FilenameInZipMode,
@@ -49,7 +49,7 @@ impl From<RequestInvoicesForConversion> for InvoicesForConversion {
     fn from(req: RequestInvoicesForConversion) -> Self {
         InvoicesForConversion {
             target_type: req.target_type,
-            target_format: req.target_format,
+            target_compression_type: req.target_compression_type,
             year: req.year,
             filename_in_zip: req.filename_in_zip,
             items: req
@@ -130,28 +130,4 @@ pub async fn get_invoices_handler(
             Json(invoice_conversion_result.into()),
         )),
     }
-
-    /*
-        let response = handle
-                .await
-                .map_err(|join_err| {
-                    if join_err.is_panic() {
-                        //log::error!("Blocking task panicked: {:?}", join_err);
-                        InvConvError::TaskJoinError(
-                            "Internal error: task panicked during processing".to_string()
-                        )
-                    } else if join_err.is_cancelled() {
-                        //log::warn!("Blocking task was cancelled");
-                        InvConvError::TaskJoinError(
-                            "Task was cancelled".to_string()
-                        )
-                    } else {
-                        //log::error!("Blocking task failed: {:?}", join_err);
-                        InvConvError::TaskJoinError(
-                            format!("Task execution failed: {}", join_err)
-                        )
-                    }
-                })?  // First ? handles JoinError
-                ?;
-    */
 }

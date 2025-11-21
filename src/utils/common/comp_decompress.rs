@@ -18,7 +18,7 @@ pub async fn xz_decompress(
         })
     } else {
         // Large file: spawn blocking task with timeout
-
+        //
         let decompression_task =
             tokio::task::spawn_blocking(move || decompress_sync(content, uncompressed_size));
 
@@ -38,14 +38,10 @@ pub async fn xz_decompress(
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                cancellation_token.cancel();
                 Err(InvConvError::DecompressTimeout {
                     object_id: object_id.to_string(),
                     timeout_secs: 30,
                 })
-            }
-            _ = token_clone.cancelled() => {
-                Err(InvConvError::DecompressCancelled  (object_id.to_string()))
             }
         }
     }

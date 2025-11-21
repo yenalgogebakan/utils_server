@@ -17,6 +17,9 @@ pub enum ObjectStoreError {
     #[error("Multiple records found in bucket '{0}' for key '{1}'")]
     MultipleRecordsFound(String, String),
 
+    #[error("No record found in bucket '{0}' for key '{1}'")]
+    NoRecordFound(String, String),
+
     #[error("Missing field '{0}' ")]
     MissingField(String),
 

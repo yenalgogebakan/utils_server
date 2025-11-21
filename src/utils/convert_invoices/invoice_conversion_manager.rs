@@ -1,16 +1,16 @@
 use crate::utils::appstate::appstate::SharedState;
 use crate::utils::common::comp_decompress::xz_decompress;
-use crate::utils::common::download_types_and_formats::{
-    DownloadFormat, DownloadType, FilenameInZipMode,
-};
 use crate::utils::common::san_desanitize::sanitize_fast;
+use crate::utils::common::target_types_and_formats::{
+    FilenameInZipMode, TargetCompressionType, TargetType,
+};
 use crate::utils::convert_invoices::convert_and_zip_worker::convert_and_zip;
 use crate::utils::convert_invoices::extract_xslt_key_from_xml::extract_xslt_key_from_xml;
+use crate::utils::convert_invoices::get_xslt_from_objstore::get_xslt_from_objstore;
 use crate::utils::errors::invoice_conversion_errors::{ErrCtx, InvConvError};
 use crate::utils::errors::log_error::log_error;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::bytes;
 use tokio_util::sync::CancellationToken;
@@ -26,8 +26,8 @@ pub struct InvoiceItemForConversion {
 /// ----- Batch of invoices to be converted -----
 #[derive(Debug, Clone)]
 pub struct InvoicesForConversion {
-    pub target_type: DownloadType,
-    pub target_format: DownloadFormat,
+    pub target_type: TargetType,
+    pub target_compression_type: TargetCompressionType,
     pub year: String,
     pub filename_in_zip: FilenameInZipMode,
 
@@ -80,7 +80,10 @@ pub async fn convert_invoices(
     cancellation_token: CancellationToken,
 ) -> Result<InvoiceConversionResult, InvConvError> {
     let mut xslt_cache: HashMap<String, bytes::Bytes> = HashMap::with_capacity(4);
+
     let filename_in_zip_mode: FilenameInZipMode = conversion_request.filename_in_zip;
+    let target_type = conversion_request.target_type;
+    let target_compression_type = conversion_request.target_compression_type;
 
     let (tx_jobs, rx_jobs) = mpsc::channel::<InvoiceConversionJob>(8); // Vec will hold the Zipped data
 
@@ -89,12 +92,20 @@ pub async fn convert_invoices(
     let worker_token = CancellationToken::new();
     let worker_cancellation_token = worker_token.clone(); // move the original downstream
     let handle = tokio::task::spawn_blocking(move || {
-        convert_and_zip(rx_jobs, state_cloned, worker_token, filename_in_zip_mode)
+        convert_and_zip(
+            rx_jobs,
+            state_cloned,
+            worker_token,
+            target_type,
+            target_compression_type,
+            filename_in_zip_mode,
+        )
     });
 
     let object_store = &state.object_store;
-    for (idx, item) in conversion_request.items.iter().enumerate() {
+    for (_, item) in conversion_request.items.iter().enumerate() {
         if cancellation_token.is_cancelled() {
+            // connection dropped, cancel the worker and return
             worker_cancellation_token.cancel();
             drop(tx_jobs);
             return Err(InvConvError::ClientDisconnectedError(
@@ -102,27 +113,7 @@ pub async fn convert_invoices(
             ))
             .ctx("convert_invoices:process cancelled");
         }
-        // Check if the compressed ubl exists
-        if !object_store
-            .object_exists("ubls", &item.object_id, &conversion_request.year)
-            .await?
-        {
-            let err = InvConvError::UblNotFoundInObjectStore(item.object_id.clone());
-            log_error(&err);
-            // stop the pipeline
-            worker_cancellation_token.cancel();
-            drop(tx_jobs);
 
-            let worker_res = handle
-                .await
-                .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
-
-            if err.is_fatal() {
-                return Err(err).ctx("convert_invoices");
-            } else {
-                return worker_res;
-            }
-        }
         // get compressed ubl
         let object_store_rec_for_xml = match object_store
             .get("ubls", &item.object_id, &conversion_request.year)
@@ -149,16 +140,7 @@ pub async fn convert_invoices(
                 }
             }
         };
-        /*
-        if cancellation_token.is_cancelled() {
-            worker_cancellation_token.cancel();
-            drop(tx_jobs);
-            return Err(InvConvError::ClientDisconnectedError(
-                "Client disconnected, task canceled".to_string(),
-            ))
-            .ctx("convert_invoices:process cancelled");
-        }
-        */
+
         let uncompressed_size = object_store_rec_for_xml.original_size as usize;
         let decompressed: bytes::Bytes = match xz_decompress(
             object_store_rec_for_xml.objcontent,
@@ -228,28 +210,88 @@ pub async fn convert_invoices(
                     }
                 }
             };
-        let xslt_data: Option<bytes::Bytes> = if xslt_cache.contains_key(&xslt_key) {
-            // Cache HIT - worker already has this XSLT
-            None
-        } else {
-            // Cache MISS - will be implemented later
-            todo!("Fetch and decompress XSLT from object store")
+
+        let job = match xslt_cache.contains_key(&xslt_key) {
+            true => {
+                // Cache HIT - worker already has this XSLT
+                InvoiceConversionJob {
+                    item: item.clone(),
+                    xml_data: sanitized_xml.clone(),
+                    xslt_key: xslt_key.clone(),
+                    xslt_data: None,
+                }
+            }
+            false => {
+                // Cache MISS
+                let xslt_data =
+                    match get_xslt_from_objstore(object_store, &conversion_request.year, &xslt_key)
+                        .await
+                    {
+                        Ok(xslt_data) => xslt_data, // we have the xslt
+                        Err(err) => {
+                            let inv_err: InvConvError = err.into();
+                            log_error(&inv_err);
+
+                            // stop the pipeline
+                            worker_cancellation_token.cancel();
+                            drop(tx_jobs);
+
+                            // wait worker to finalize/stop
+                            let worker_res = handle
+                                .await
+                                .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+
+                            if inv_err.is_fatal() {
+                                return Err(inv_err).ctx("convert_invoices"); // no body
+                            } else {
+                                return worker_res; // partial body from worker
+                            }
+                        }
+                    };
+                xslt_cache.insert(xslt_key.clone(), xslt_data.clone());
+                InvoiceConversionJob {
+                    item: item.clone(),
+                    xml_data: sanitized_xml,
+                    xslt_key: xslt_key.clone(),
+                    xslt_data: Some(xslt_data),
+                }
+            }
         };
 
-        let job = InvoiceConversionJob {
-            item: item.clone(),
-            xml_data: sanitized_xml,
-            xslt_key: xslt_key.clone(),
-            xslt_data,
-        };
+        // SEND TO WORKER
+        if tx_jobs.send(job).await.is_err() {
+            // The receiver (worker) dropped, likely due to a panic or error on their side.
+            // We stop the pipeline.
+            worker_cancellation_token.cancel();
+            drop(tx_jobs);
+            // 3. Await the worker handle to find out WHY it died.
+            // This is better than just returning "Channel Closed", because
+            // the worker might have returned "Disk Full" or "Zip Error".
+            let worker_result = handle
+                .await
+                .map_err(|e| InvConvError::TaskJoinError(e.to_string()))?;
+            // 4. Determine what to return
+            match worker_result {
+                // Case A: The worker returned a specific error (e.g. ZipFailed)
+                Err(worker_err) => return Err(worker_err).ctx("convert_invoices:worker_failed"),
+
+                // Case B: The worker returned Ok, but closed the channel?
+                // This implies logic error or unexpected early exit.
+                Ok(_) => {
+                    return Err(InvConvError::TaskJoinError(
+                        "Worker closed channel unexpectedly".to_string(),
+                    ))
+                    .ctx("convert_invoices:send_job");
+                }
+            }
+        }
     }
 
-    // Placeholder implementation
-    Ok(InvoiceConversionResult {
-        data: Vec::new(),
-        docs_count: 0,
-        size: 0,
-        last_processed_sira_no: None,
-        request_fully_completed: true,
-    })
+    // Clean up
+    drop(tx_jobs);
+    let worker_res = handle
+        .await
+        .map_err(|e| InvConvError::TaskJoinError(e.to_string()))??;
+
+    Ok(worker_res)
 }

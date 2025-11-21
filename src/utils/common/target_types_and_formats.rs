@@ -3,14 +3,14 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "PascalCase")]
-pub enum DownloadType {
+pub enum TargetType {
     Html,
     Pdf,
     Ubl,
     #[serde(rename = "Ubl_Xslt_Separate")]
     UblXsltSeparate,
 }
-impl fmt::Display for DownloadType {
+impl fmt::Display for TargetType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Html => write!(f, "Html"),
@@ -20,20 +20,20 @@ impl fmt::Display for DownloadType {
         }
     }
 }
-impl Default for DownloadType {
+impl Default for TargetType {
     fn default() -> Self {
-        DownloadType::Html
+        TargetType::Html
     }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
-pub enum DownloadFormat {
+pub enum TargetCompressionType {
     Zip,  // .zip
     Tzip, // .tar.xz
     Gzip, // .tar.gz  (multi-file via tar.gz)
 }
-impl fmt::Display for DownloadFormat {
+impl fmt::Display for TargetCompressionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Zip => write!(f, "Zip"),
@@ -42,9 +42,9 @@ impl fmt::Display for DownloadFormat {
         }
     }
 }
-impl Default for DownloadFormat {
+impl Default for TargetCompressionType {
     fn default() -> Self {
-        DownloadFormat::Zip
+        TargetCompressionType::Zip
     }
 }
 

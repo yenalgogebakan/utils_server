@@ -78,6 +78,12 @@ impl MssqlStore {
                 key.to_string(),
             ));
         }
+        if rows.len() == 0 {
+            return Err(ObjectStoreError::NoRecordFound(
+                bucket.to_string(),
+                key.to_string(),
+            ));
+        }
 
         let row = &rows[0];
         let object_content = row

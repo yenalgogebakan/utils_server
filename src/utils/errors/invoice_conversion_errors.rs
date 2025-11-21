@@ -19,14 +19,6 @@ pub enum InvConvError {
     #[error("Error: {0}")]
     ClientDisconnectedError(String),
 
-    /*
-    #[error("Error: '{object_id}': {source}")]
-    ObjStoreError {
-        object_id: String, // To hold the ID of the object
-        #[source] // Indicate that this is the underlying source error
-        source: ObjectStoreError,
-    },
-    */
     #[error("Error: {0}")]
     ObjStoreError(#[from] ObjectStoreError),
 
