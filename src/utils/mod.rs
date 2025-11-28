@@ -8,3 +8,4 @@ pub mod errors;
 pub mod incoming_invoice;
 pub mod object_store;
 pub mod rest_handlers;
+pub mod xslt_engine;

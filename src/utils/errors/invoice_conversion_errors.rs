@@ -79,6 +79,12 @@ pub enum InvConvError {
     #[error("Xslt object id is invalid: object_id: {0}")]
     InvalidXsltobjectIdError(String),
 
+    #[error("Xrust XSLT error: {0}")]
+    XRustXsltError(String),
+
+    #[error("Xslt key is not in cache and xslt data is missing xsltkey: {0}")]
+    XsltDataMissing(String),
+
     // Function context (preserves typed inner error)
     #[error("{func}: {source}")]
     Context {
@@ -119,6 +125,8 @@ impl InvConvError {
             InvConvError::InvalidXsltobjectIdError(_) => 2009,
             InvConvError::DecompressTimeout { .. } => 2010,
             InvConvError::DecompressCancelled(_) => 2011,
+            InvConvError::XRustXsltError(_) => 2012,
+            InvConvError::XsltDataMissing(_) => 2013,
             InvConvError::Context { source, .. } => source.error_code(),
         }
     }

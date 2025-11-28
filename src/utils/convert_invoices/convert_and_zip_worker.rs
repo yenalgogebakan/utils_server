@@ -6,6 +6,8 @@ use crate::utils::convert_invoices::invoice_conversion_manager::{
     InvoiceConversionJob, InvoiceConversionResult,
 };
 use crate::utils::errors::invoice_conversion_errors::{ErrCtx, InvConvError};
+use crate::utils::xslt_engine::xrust_engine::XrustEngine;
+use crate::utils::xslt_engine::xslt_engine::XsltEngine;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use tempfile::tempfile;
@@ -30,6 +32,11 @@ pub fn convert_and_zip(
     let mut last_processed_sira_no = 0u64;
     let mut total_html_bytes = 0u64;
 
+    let engine = XrustEngine::new();
+    type Compiled = <XrustEngine as XsltEngine>::Compiled;
+    let mut xslt_cache: HashMap<String, Compiled> = HashMap::with_capacity(4);
+
+    // Process incoming jobs
     while let Some(invoice_conversion_job) = rx.blocking_recv() {
         if worker_cancellation_token.is_cancelled() {
             return Err(InvConvError::ClientDisconnectedError(
@@ -38,7 +45,26 @@ pub fn convert_and_zip(
             .ctx("convert_and_zip:process cancelled");
         }
 
-        let mut xslt_cache: HashMap<String, bytes::Bytes> = HashMap::with_capacity(4);
+        let compiled = if let Some(cached) = xslt_cache.get(&invoice_conversion_job.xslt_key) {
+            cached
+        } else {
+            // not in cache, xslt data should be present
+            let bytes = invoice_conversion_job
+                .xslt_data
+                .as_ref()
+                .ok_or(InvConvError::XsltDataMissing(
+                    invoice_conversion_job.xslt_key.clone(),
+                ))
+                .ctx("convert_and_zip:xslt_data missing")?;
+
+            let compiled = engine.compile(bytes)?;
+
+            xslt_cache.insert(invoice_conversion_job.xslt_key.clone(), compiled);
+            xslt_cache.get(&invoice_conversion_job.xslt_key).unwrap()
+        };
+
+        let html_bytes = engine.transform(compiled, &invoice_conversion_job.xml_data)?;
+
         match transform_xml_to_html_bytes(&xml_bytes) {
             Ok(html) => {
                 let filename = filename_in_zip(&item, FilenameInZipMode::Default, docs_count);
