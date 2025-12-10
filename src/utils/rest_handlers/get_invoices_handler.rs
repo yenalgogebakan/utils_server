@@ -41,6 +41,8 @@ pub struct RequestInvoicesForConversion {
     pub year: String,
     #[serde(default)]
     pub filename_in_zip: FilenameInZipMode,
+    pub request_id: String,
+    pub client_id: Option<String>,
 
     /// Items to fetch/process
     pub items: Vec<RequestInvoiceItemForConversion>,
@@ -52,6 +54,8 @@ impl From<RequestInvoicesForConversion> for InvoicesForConversion {
             target_compression_type: req.target_compression_type,
             year: req.year,
             filename_in_zip: req.filename_in_zip,
+            request_id: req.request_id,
+            client_id: req.client_id,
             items: req
                 .items
                 .into_iter()
@@ -70,7 +74,7 @@ pub struct ResponseInvoicesForConversion {
     pub data: Vec<u8>,
 
     /// Number of docs included
-    pub docs_count: u32,
+    pub docs_count: u8,
 
     /// Total byte size of the ZIP (or payload) in bytes
     pub size: u64,

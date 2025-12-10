@@ -30,6 +30,8 @@ pub struct InvoicesForConversion {
     pub target_compression_type: TargetCompressionType,
     pub year: String,
     pub filename_in_zip: FilenameInZipMode,
+    pub request_id: String,
+    pub client_id: Option<String>,
 
     /// Items to fetch/process
     pub items: Vec<InvoiceItemForConversion>,
@@ -39,7 +41,7 @@ pub struct InvoicesForConversion {
 #[derive(Debug, Clone, Default)]
 pub struct InvoiceConversionResult {
     pub data: Vec<u8>,
-    pub docs_count: u32,
+    pub docs_count: u8,
     pub size: u64,
     pub last_processed_sira_no: Option<u64>,
     pub request_fully_completed: bool,
@@ -84,8 +86,9 @@ pub async fn convert_invoices(
     let filename_in_zip_mode: FilenameInZipMode = conversion_request.filename_in_zip;
     let target_type = conversion_request.target_type;
     let target_compression_type = conversion_request.target_compression_type;
+    let request_id = conversion_request.request_id.clone();
 
-    let (tx_jobs, rx_jobs) = mpsc::channel::<InvoiceConversionJob>(8); // Vec will hold the Zipped data
+    let (tx_jobs, rx_jobs) = mpsc::channel::<InvoiceConversionJob>(8);
 
     let state_cloned = state.clone();
 
@@ -93,6 +96,7 @@ pub async fn convert_invoices(
     let worker_cancellation_token = worker_token.clone(); // move the original downstream
     let handle = tokio::task::spawn_blocking(move || {
         convert_and_zip(
+            &request_id,
             rx_jobs,
             state_cloned,
             worker_token,

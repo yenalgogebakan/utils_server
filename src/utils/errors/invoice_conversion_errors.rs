@@ -22,6 +22,13 @@ pub enum InvConvError {
     #[error("Error: {0}")]
     ObjStoreError(#[from] ObjectStoreError),
 
+    #[error("Zip error for  request_id '{request_id}': {source}")]
+    ZipFileCreationError {
+        request_id: String, // To hold the ID of the object
+        #[source] // Indicate that this is the underlying source error
+        source: io::Error,
+    },
+
     #[error("Zip error for  sira_no '{sira_no}': {source}")]
     ZipError {
         sira_no: String, // To hold the ID of the object
@@ -104,6 +111,7 @@ impl InvConvError {
                 | InvConvError::ClientDisconnectedError(_)
                 | InvConvError::ObjStoreError { .. }
                 | InvConvError::Context { .. }
+                | InvConvError::ZipFileCreationError { .. }
         )
     }
     pub fn error_code(&self) -> i32 {
@@ -127,6 +135,8 @@ impl InvConvError {
             InvConvError::DecompressCancelled(_) => 2011,
             InvConvError::XRustXsltError(_) => 2012,
             InvConvError::XsltDataMissing(_) => 2013,
+            InvConvError::ZipFileCreationError { .. } => 2014,
+
             InvConvError::Context { source, .. } => source.error_code(),
         }
     }

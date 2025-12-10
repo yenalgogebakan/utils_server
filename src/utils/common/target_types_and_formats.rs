@@ -48,26 +48,22 @@ impl Default for TargetCompressionType {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub enum FilenameInZipMode {
     ExtractFromObjID,
-    IncludedInRequest,
     UseSiraNo,
+    IncludedInRequest,
+    #[default]
     StartFromInvoiceOne,
 }
 impl fmt::Display for FilenameInZipMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ExtractFromObjID => write!(f, "ExtractFromObjID"),
-            Self::IncludedInRequest => write!(f, "IncludedInRequest"),
             Self::UseSiraNo => write!(f, "UseSiraNo"),
+            Self::IncludedInRequest => write!(f, "IncludedInRequest"),
             Self::StartFromInvoiceOne => write!(f, "StartFromInvoiceOne"),
         }
-    }
-}
-impl Default for FilenameInZipMode {
-    fn default() -> Self {
-        FilenameInZipMode::StartFromInvoiceOne
     }
 }
