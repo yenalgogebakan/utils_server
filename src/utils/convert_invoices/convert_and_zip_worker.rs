@@ -11,18 +11,15 @@ use crate::utils::xslt_engine::libxslt_engine::LibXsltEngine;
 use crate::utils::xslt_engine::xrust_engine::XrustEngine;
 use crate::utils::xslt_engine::xslt_engine::XsltEngine;
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom, Write};
-use tempfile::tempfile;
+use std::collections::hash_map::Entry;
 use tokio::sync::mpsc;
-//use tokio_util::bytes;
 use tokio_util::sync::CancellationToken;
-use zip::{CompressionMethod, ZipWriter, write::FileOptions};
 
 /// ---- blocking worker ----
 pub fn convert_and_zip(
     request_id: &String,
     mut rx: mpsc::Receiver<InvoiceConversionJob>,
-    _state: SharedState,
+    _state: SharedState, // No use, may be required in the future
     worker_cancellation_token: CancellationToken,
     _target_type: TargetType,
     _target_compression_type: TargetCompressionType,
@@ -37,9 +34,6 @@ pub fn convert_and_zip(
             };
 
             log_error(&my_err);
-            if my_err.is_fatal() {
-                return Err(my_err);
-            }
             return Err(my_err);
         }
     };
@@ -53,7 +47,7 @@ pub fn convert_and_zip(
     type Compiled = <XrustEngine as XsltEngine>::Compiled;
 
     let _engine2 = XrustEngine::new();
-    type Compiled2 = <LibXsltEngine as XsltEngine>::Compiled;
+    type _Compiled2 = <LibXsltEngine as XsltEngine>::Compiled;
 
     let mut xslt_cache: HashMap<String, Compiled> = HashMap::with_capacity(4);
 
@@ -65,26 +59,27 @@ pub fn convert_and_zip(
             ))
             .ctx("convert_and_zip:process cancelled");
         }
+        let compiled_ref = match xslt_cache.entry(invoice_conversion_job.xslt_key.clone()) {
+            Entry::Occupied(o) => o.into_mut(),
+            Entry::Vacant(v) => {
+                // If not in cache, we MUST have data.
+                let bytes = match invoice_conversion_job.xslt_data.as_ref() {
+                    Some(b) => b,
+                    None => {
+                        let err =
+                            InvConvError::XsltDataMissing(invoice_conversion_job.xslt_key.clone());
+                        // Explicitly log before returning as requested
+                        log_error(&err);
+                        return Err(err);
+                    }
+                };
 
-        let compiled = if let Some(cached) = xslt_cache.get(&invoice_conversion_job.xslt_key) {
-            cached
-        } else {
-            // not in cache, xslt data should be present
-            let bytes = invoice_conversion_job
-                .xslt_data
-                .as_ref()
-                .ok_or(InvConvError::XsltDataMissing(
-                    invoice_conversion_job.xslt_key.clone(),
-                ))
-                .ctx("convert_and_zip:xslt_data missing")?;
-
-            let compiled = engine.compile(bytes)?;
-
-            xslt_cache.insert(invoice_conversion_job.xslt_key.clone(), compiled);
-            xslt_cache.get(&invoice_conversion_job.xslt_key).unwrap()
+                let compiled = engine.compile(bytes)?;
+                v.insert(compiled)
+            }
         };
 
-        match engine.transform(compiled, &invoice_conversion_job.xml_data) {
+        match engine.transform(compiled_ref, &invoice_conversion_job.xml_data) {
             Ok(html_bytes) => {
                 let filename = filename_in_zip(
                     &invoice_conversion_job.item,
@@ -92,79 +87,70 @@ pub fn convert_and_zip(
                     docs_count,
                 );
 
-                if let Err(e) =
-                    zip.write_to_zip(&filename, html_bytes)
-                        .map_err(|e| InvConvError::ZipIOError {
-                            sira_no: invoice_conversion_job.item.sira_no.unwrap_or(0).to_string(),
-                            source: e,
-                        })
-                {
-                    log_error(&e);
-                    if e.is_fatal() {
-                        return Err(e);
+                let current_bytes_len = html_bytes.len() as u64;
+
+                if let Err(e) = zip.write_to_zip(&filename, html_bytes) {
+                    let wrapped_err = InvConvError::ZipIOError {
+                        sira_no: invoice_conversion_job.item.sira_no.unwrap_or(0).to_string(),
+                        source: e,
+                    };
+                    log_error(&wrapped_err);
+                    if wrapped_err.is_fatal() {
+                        return Err(wrapped_err);
                     }
 
-                    close_zip_and_return(
-                        &mut zip,
-                        docs_count,
-                        total_html_bytes,
-                        last_processed_sira_no,
-                        false,
-                    )?;
+                    match zip.close_zip() {
+                        Ok(bytes) => {
+                            return Ok(InvoiceConversionResult {
+                                data: bytes,
+                                docs_count,
+                                size: total_html_bytes,
+                                last_processed_sira_no: Some(last_processed_sira_no),
+                                request_fully_completed: false,
+                            });
+                        }
+                        Err(zip_err) => {
+                            let final_err = InvConvError::ZipError {
+                                request_id: request_id.to_string(),
+                                sira_no: last_processed_sira_no.to_string(),
+                                source: zip_err,
+                            };
+                            log_error(&final_err);
+                            return Err(final_err);
+                        }
+                    }
+                }
+
+                docs_count += 1;
+                total_html_bytes += current_bytes_len;
+                if let Some(sn) = invoice_conversion_job.item.sira_no {
+                    last_processed_sira_no = sn;
                 }
             }
             Err(e) => {
                 log_error(&e);
-                if e.is_fatal() {
-                    return Err(e);
-                }
-
-                close_zip_and_return(
-                    &mut zip,
-                    docs_count,
-                    total_html_bytes,
-                    last_processed_sira_no,
-                    false,
-                )?;
+                return Err(e);
             }
         }
-
-        /*
-        match transform_xml_to_html_bytes(&xml_bytes) {
-            Ok(html) => {
-                let filename = filename_in_zip(&item, FilenameInZipMode::default(), docs_count);
-                if let Err(e) = zip.start_file(filename, zip_opts) {
-                    let err = DocProcessingError::ZipError {
-                        sira_no: item.sira_no.unwrap_or(0).to_string(),
-                        source: e,
-                    };
-                    if err.is_fatal() {
-                        return Err(err);
-                    } else {
-                        continue;
-                    }
-                }
-                zip.write_all(&html).unwrap();
-                docs_count += 1;
-            }
-            Err(err) => {
-                if err.is_fatal() {
-                    return Err(err);
-                } else {
-                    continue;
-                }
-            }
-        }*/
     }
-
-    // Placeholder implementation
-    Ok(InvoiceConversionResult {
-        data: Vec::new(),
-        docs_count: 0,
-        size: 0,
-        last_processed_sira_no: None,
-        request_fully_completed: true,
-    })
+    match zip.close_zip() {
+        Ok(bytes) => Ok(InvoiceConversionResult {
+            data: bytes,
+            docs_count,
+            size: total_html_bytes,
+            last_processed_sira_no: Some(last_processed_sira_no),
+            request_fully_completed: true,
+        }),
+        Err(e) => {
+            let my_err = InvConvError::ZipError {
+                request_id: request_id.to_string(),
+                sira_no: last_processed_sira_no.to_string(),
+                source: e,
+            };
+            log_error(&my_err);
+            Err(my_err)
+        }
+    }
 }
 
 /// Determine the filename to use inside the ZIP archive based on the specified mode.
@@ -192,28 +178,6 @@ fn filename_in_zip(
         },
         FilenameInZipMode::StartFromInvoiceOne => format!("Fat_{}", docs_count),
     }
-}
-
-fn close_zip_and_return(
-    zip: &mut ZipWriter<std::fs::File>,
-    docs_count: u8,
-    size: u64,
-    last_processed_sira_no: u64,
-    request_fully_completed: bool,
-) -> Result<InvoiceConversionResult, InvConvError> {
-    let mut tmp = zip.finish().unwrap();
-    let file_size = tmp.metadata().unwrap().len();
-    let mut buf = Vec::with_capacity(file_size as usize);
-    tmp.seek(SeekFrom::Start(0)).unwrap();
-    tmp.read_to_end(&mut buf).unwrap();
-
-    Ok(InvoiceConversionResult {
-        data: buf,
-        docs_count: docs_count,
-        size: size,
-        last_processed_sira_no: Some(last_processed_sira_no),
-        request_fully_completed: request_fully_completed,
-    })
 }
 
 fn log_error(e: &InvConvError) {

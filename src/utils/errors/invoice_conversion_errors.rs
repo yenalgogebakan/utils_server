@@ -24,13 +24,14 @@ pub enum InvConvError {
 
     #[error("Zip error for  request_id '{request_id}': {source}")]
     ZipFileCreationError {
-        request_id: String, // To hold the ID of the object
-        #[source] // Indicate that this is the underlying source error
+        request_id: String,
+        #[source]
         source: io::Error,
     },
 
-    #[error("Zip error for  sira_no '{sira_no}': {source}")]
+    #[error("Zip error for  request_id '{request_id}' sira_no '{sira_no}': {source}")]
     ZipError {
+        request_id: String,
         sira_no: String, // To hold the ID of the object
         #[source] // Indicate that this is the underlying source error
         source: zip::result::ZipError,

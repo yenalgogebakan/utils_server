@@ -1,8 +1,8 @@
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
-use tempfile::tempfile;
 use tokio_util::bytes;
-use zip::{CompressionMethod, ZipWriter, write::FileOptions};
+use zip::result::ZipError;
+use zip::{ZipWriter, write::FileOptions};
 
 pub struct ZipFile {
     pub zip: ZipWriter<std::fs::File>,
@@ -28,5 +28,26 @@ impl ZipFile {
         self.zip.write_all(&content)?;
 
         Ok(())
+    }
+
+    pub fn close_zip(mut self) -> Result<Vec<u8>, ZipError> {
+        // 1. Apply the final Zip footer (Central Directory).
+        // This consumes the ZipWriter and returns the underlying File.
+        let mut file = self.zip.finish()?;
+
+        // 2. The file cursor is currently at the end of the file.
+        // We need to rewind it to the beginning to read the data back.
+        file.seek(SeekFrom::Start(0))?;
+
+        // 3. Optimization: Get the file size to pre-allocate the Vec.
+        // This ensures we only allocate memory once, preventing multiple
+        // resizing operations as the buffer grows.
+        let len = file.metadata()?.len() as usize;
+        let mut buffer = Vec::with_capacity(len);
+
+        // 4. Read the file contents into the buffer.
+        file.read_to_end(&mut buffer)?;
+
+        Ok(buffer)
     }
 }
